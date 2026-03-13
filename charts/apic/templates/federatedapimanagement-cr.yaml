@@ -1,0 +1,47 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if and .Values.federatedapimanagement.enabled (or (eq $wave "3") (eq $wave "all")) }}
+# =============================================================================
+# Wave 3 – FederatedAPIManagementCluster CR
+# =============================================================================
+apiVersion: federatedapimanagement.apiconnect.ibm.com/v1beta1
+kind: FederatedAPIManagementCluster
+metadata:
+  name: fam
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  version: {{ .Values.global.appProductVersion }}
+  profile: {{ .Values.federatedapimanagement.profile }}
+  imagePullSecrets:
+    - {{ .Values.global.imagePullSecret }}
+  imageRegistry: {{ .Values.global.imageRegistry }}
+  analyticsRef:
+    name: {{ .Values.federatedapimanagement.analyticsRef.name }}
+    namespace: {{ include "apic.analyticsRefNamespace" (dict "ref" .Values.federatedapimanagement.analyticsRef "global" .Values.global) }}
+  uiEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: fam.{{ .Values.global.stackHost }}
+      secretName: fam-ui-endpoint
+  adminEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: api.fam.{{ .Values.global.stackHost }}
+      secretName: fam-admin-endpoint
+  adminClientSubjectDN: CN=federatedapimanagement-admin-client,O=cert-manager
+  microServiceSecurity: certManager
+  certManagerIssuer:
+    name: "selfsigning-issuer"
+    kind: "Issuer"
+  license:
+    accept: {{ .Values.global.license.accept }}
+    use: {{ .Values.global.license.use }}
+    license: {{ .Values.global.license.id | quote }}
+{{- end }}
+
+

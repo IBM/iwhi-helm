@@ -1,0 +1,190 @@
+# =============================================================================
+# IBM webMethods Hybrid Integration (IWHI) – Helm Chart Values
+# =============================================================================
+# This file documents every configurable parameter.
+# Override per environment using values-<env>.yaml (e.g. values-dev.yaml).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Deployment control (wave-based deployment)
+# -----------------------------------------------------------------------------
+deployment:
+  # REQUIRED: Specifies which deployment wave to execute
+  # Valid values: "1", "2", "3", "all"
+  # - "1": Operators only (operatorGroup + subscriptions)
+  # - "2": Certificates only (requires wave 1 to be complete)
+  # - "3": Subsystems only (requires wave 2 to be complete)
+  # - "all": Everything with ArgoCD sync-wave annotations (GitOps mode)
+  #
+  # Usage examples:
+  #   helm install apic-operators . -f values-dev.yaml --set deployment.wave=1
+  #   helm install apic-certificates . -f values-dev.yaml --set deployment.wave=2
+  #   helm install apic-subsystems . -f values-dev.yaml --set deployment.wave=3
+  wave: ""  # Must be explicitly set - no default to prevent accidental full deployment
+
+# -----------------------------------------------------------------------------
+# Global / shared settings
+# -----------------------------------------------------------------------------
+global:
+  # Target OpenShift namespace for all subsystem resources
+  namespace: iwhi-dev
+
+  # Image pull secret name (must exist in the namespace before deployment)
+  imagePullSecret: ibm-entitlement-key
+
+  # Container image registry for API Connect subsystem images
+  imageRegistry: cp.icr.io/cp/apic
+
+  # Base domain for all ingress endpoints  (e.g. apps.<cluster-domain>)
+  stackHost: apps.example.com
+
+  # Default block storage class for persistent volumes
+  storageClass: ocs-external-storagecluster-ceph-rbd
+
+  # API Connect product version (must match the operator release)
+  appProductVersion: "12.1.0.1"
+
+  # IBM License configuration
+  license:
+    # Set to true to accept the IBM license agreement
+    accept: false
+    use: production
+    # License ID – obtain from IBM Passport Advantage
+    id: L-PDZK-TWDH97
+    metric: PROCESSOR_VALUE_UNIT
+
+# -----------------------------------------------------------------------------
+# Operator catalog sources (wave 0)
+# -----------------------------------------------------------------------------
+# Catalog
+# -----------------------------------------------------------------------------
+# Operator group & subscriptions (wave 1)
+# -----------------------------------------------------------------------------
+operatorGroup:
+  enabled: true   
+  name: apiconnect-operator-group
+
+subscriptions:
+  enabled: true  
+  apiconnect:
+    name: ibm-apiconnect
+    channel: v7.1
+    source: ibm-apiconnect-catalog
+    sourceNamespace: openshift-marketplace
+
+  commonServices:
+    name: ibm-common-service-operator
+    channel: v4.6
+    source: opencloud-operators
+    sourceNamespace: openshift-marketplace
+
+# -----------------------------------------------------------------------------
+# Certificates (wave 2)
+# -----------------------------------------------------------------------------
+certificates:
+  enabled: true
+
+  # Certificate issuer used for ALL certificates (ingress endpoints AND internal mTLS)
+  # If name is empty (""), a self-signed CA and namespace-scoped Issuer will be created
+  # If name is provided, it must reference an existing Issuer or ClusterIssuer
+  #
+  # Important: IBM API Connect requires all certificates to be signed by the same CA
+  # for proper trust validation between subsystems.
+  #
+  # Examples:
+  #   Self-signed (default):
+  #     name: ""
+  #     kind: Issuer
+  #
+  #   External enterprise CA:
+  #     name: "enterprise-issuer"
+  #     kind: Issuer  (or ClusterIssuer)
+  #     caSecretName: "enterprise-ca"
+  issuer:
+    name: ""
+    kind: Issuer
+    # Name of the CA secret in the namespace (required for Analytics platformCASecret)
+    # defaults to "ingress-ca" for self-signed
+    caSecretName: ""
+
+# -----------------------------------------------------------------------------
+# Management subsystem (wave 3)
+# -----------------------------------------------------------------------------
+management:
+  enabled: true
+  profile: n1xc2.m16
+  storageClass: ""   # leave empty to inherit global.storageClass
+
+# -----------------------------------------------------------------------------
+# Analytics subsystem (wave 3)
+# -----------------------------------------------------------------------------
+analytics:
+  enabled: true
+  profile: n1xc2.m16
+  storageClass: ""   # leave empty to inherit global.storageClass
+  storageType: shared
+  dataVolumeSize: 100Gi
+  platformCASecret: ""  # leave empty to use certificates.caSecretName
+  # Enable additional analytics modes
+  federatedAPIManagementMode: true
+  devPortalMode: true
+
+# -----------------------------------------------------------------------------
+# Developer Portal subsystem (wave 3)
+# -----------------------------------------------------------------------------
+devportal:
+  enabled: true
+  profile: n1xc2.m4
+  # Reference to the analytics subsystem
+  analyticsRef:
+    name: analytics
+    namespace: ""   # leave empty to use global.namespace
+
+# -----------------------------------------------------------------------------
+# webMethods API Gateway subsystem (wave 3)
+# -----------------------------------------------------------------------------
+wmapigateway:
+  enabled: true
+  profile: n1xc3.m6
+  imageRegistry: ""   # leave empty to inherit global.imageRegistry
+  storageClass: ""    # leave empty to inherit global.storageClass
+  dataVolumeSize: 10Gi
+  # Encryption secret (optional – set enabled: true to activate)
+  encryptionSecret:
+    enabled: false
+    secretName: wmapigateway-enc-key
+
+# -----------------------------------------------------------------------------
+# Nano Gateway subsystem (wave 3)
+# -----------------------------------------------------------------------------
+nanogateway:
+  enabled: true
+  profile: n1xc2.m4
+  imageRegistry: cp.icr.io/cp/datapower
+  redis:
+    host: ""          # REQUIRED – Redis/Valkey host FQDN or IP
+    port: 6379
+    mode: standalone
+    credentialSecret: valkey-secret
+    tlsSecret: valkey-tls
+
+# -----------------------------------------------------------------------------
+# Federated API Management subsystem (wave 3)
+# -----------------------------------------------------------------------------
+federatedapimanagement:
+  enabled: true
+  profile: n1xc3.m4
+  analyticsRef:
+    name: analytics
+    namespace: ""   # leave empty to use global.namespace
+
+# -----------------------------------------------------------------------------
+# DataPower API Gateway subsystem (wave 3)
+# -----------------------------------------------------------------------------
+apigw:
+  enabled: false
+  profile: n1xc1.m8
+  platformCASecret: ingress-ca
+  adminUserSecret: apigateway-admin-secret
+
+

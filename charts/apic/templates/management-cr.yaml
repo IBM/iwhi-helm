@@ -1,0 +1,84 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if and .Values.management.enabled (or (eq $wave "3") (eq $wave "all")) }}
+# =============================================================================
+# Wave 3 – ManagementCluster CR
+# Requires: operator healthy (wave 1) + all certificates ready (wave 2)
+# =============================================================================
+apiVersion: management.apiconnect.ibm.com/v1beta1
+kind: ManagementCluster
+metadata:
+  name: management
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  version: {{ .Values.global.appProductVersion }}
+  imagePullSecrets:
+  - {{ .Values.global.imagePullSecret }}
+  imageRegistry: {{ .Values.global.imageRegistry }}
+  profile: {{ .Values.management.profile }}
+  portal:
+    admin:
+      secretName: portal-admin-client
+  analytics:
+    ingestion:
+      secretName: analytics-ingestion-client
+  gateway:
+    client:
+      secretName: gateway-client-client
+  devPortal:
+    admin:
+      secretName: devportal-admin-client
+  wmAPIGateway:
+    mgmt:
+      secretName: wmapigateway-mgmt-client
+  nanoGateway:
+    mgmt:
+      secretName: nano-gateway-mgmt-client
+  federatedAPIManagement:
+    admin:
+      secretName: federatedapimanagement-admin-client
+  cloudManagerEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: admin.{{ .Values.global.stackHost }}
+      secretName: cm-endpoint
+  apiManagerEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: manager.{{ .Values.global.stackHost }}
+      secretName: apim-endpoint
+  consumerCatalogEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: consumer-catalog.{{ .Values.global.stackHost }}
+      secretName: consumer-catalog-endpoint
+  platformAPIEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: api.{{ .Values.global.stackHost }}
+      secretName: api-endpoint
+  consumerAPIEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: consumer.{{ .Values.global.stackHost }}
+      secretName: consumer-endpoint
+  databaseVolumeClaimTemplate:
+    storageClassName: {{ include "apic.storageClass" (dict "subsystem" .Values.management "global" .Values.global) }}
+  microServiceSecurity: certManager
+  certManagerIssuer:
+    name: "selfsigning-issuer"
+    kind: "Issuer"
+  license:
+    accept: {{ .Values.global.license.accept }}
+    use: {{ .Values.global.license.use }}
+    license: {{ .Values.global.license.id | quote }}
+{{- end }}
+

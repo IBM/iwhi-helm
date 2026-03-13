@@ -1,0 +1,84 @@
+# =============================================================================
+# IBM webMethods Hybrid Integration (IWHI) – DEV Environment Overrides
+# =============================================================================
+# Values sourced from iwhi.properties for the DEV environment.
+# Only values that differ from chart/values.yaml defaults are listed here.
+# =============================================================================
+
+# Deployment wave control
+# IMPORTANT: Set this parameter when deploying with Helm
+# Valid values: "1" (operators), "2" (certificates), "3" (subsystems), "all" (ArgoCD)
+#
+# Example commands:
+#   helm install apic-operators . -f values-dev.yaml --set deployment.wave=1 -n iwhi-dev
+#   helm install apic-certificates . -f values-dev.yaml --set deployment.wave=2 -n iwhi-dev
+#   helm install apic-subsystems . -f values-dev.yaml --set deployment.wave=3 -n iwhi-dev
+#
+# deployment:
+#   wave: ""  # Set via --set deployment.wave=X on command line
+
+global:
+  namespace: iwhi-dev
+  imagePullSecret: ibm-entitlement-key
+  imageRegistry: cp.icr.io/cp/apic
+  stackHost: iwhi-dev.apps.itz-r816vx.infra01-lb.fra02.techzone.ibm.com
+  storageClass: ocs-external-storagecluster-ceph-rbd
+  appProductVersion: "12.1.0.1"
+  license:
+    accept: true
+    use: production
+    id: L-PDZK-TWDH97
+
+certificates:
+  enabled: true
+
+management:
+  enabled: true
+  profile: n1xc2.m16
+
+analytics:
+  enabled: true
+  profile: n1xc2.m16
+  storageType: shared
+  dataVolumeSize: 100Gi
+  federatedAPIManagementMode: true
+  devPortalMode: true
+
+devportal:
+  enabled: true
+  profile: n1xc2.m4
+  analyticsRef:
+    name: analytics
+    namespace: iwhi-dev
+
+wmapigateway:
+  enabled: true
+  profile: n1xc3.m6
+  dataVolumeSize: 10Gi
+  encryptionSecret:
+    enabled: true
+    secretName: wmapigateway-enc-key
+
+nanogateway:
+  enabled: false
+  profile: n1xc2.m4
+  imageRegistry: cp.icr.io/cp/datapower
+  redis:
+    # TODO: replace with the actual Redis/Valkey host before deployment
+    host: valkey.iwhi-dev.svc
+    port: 6379
+    mode: standalone
+    credentialSecret: valkey-secret
+    tlsSecret: valkey-tls
+
+federatedapimanagement:
+  enabled: true
+  profile: n1xc3.m4
+  analyticsRef:
+    name: analytics
+    namespace: iwhi-dev
+
+apigw:
+  enabled: false
+
+

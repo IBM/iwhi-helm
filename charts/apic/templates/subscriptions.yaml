@@ -1,0 +1,43 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if and .Values.subscriptions.enabled (or (eq $wave "1") (eq $wave "all")) }}
+# =============================================================================
+# Wave 1 – Operator Subscriptions
+# Both subscriptions are created after the OperatorGroup (wave 1).
+# The API Connect operator depends on IBM Common Services being available.
+# =============================================================================
+
+---
+# IBM Common Services Subscription
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: {{ .Values.subscriptions.commonServices.name }}
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  channel: {{ .Values.subscriptions.commonServices.channel }}
+  name: {{ .Values.subscriptions.commonServices.name }}
+  source: {{ .Values.subscriptions.commonServices.source }}
+  sourceNamespace: {{ .Values.subscriptions.commonServices.sourceNamespace }}
+
+---
+# IBM API Connect Subscription
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: {{ .Values.subscriptions.apiconnect.name }}
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  channel: {{ .Values.subscriptions.apiconnect.channel }}
+  name: {{ .Values.subscriptions.apiconnect.name }}
+  source: {{ .Values.subscriptions.apiconnect.source }}
+  sourceNamespace: {{ .Values.subscriptions.apiconnect.sourceNamespace }}
+
+{{- end }}

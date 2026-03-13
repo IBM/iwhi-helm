@@ -1,0 +1,62 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if and .Values.wmapigateway.enabled (or (eq $wave "3") (eq $wave "all")) }}
+# =============================================================================
+# Wave 3 – WMAPIGatewayCluster CR
+# =============================================================================
+apiVersion: wmapigateway.apiconnect.ibm.com/v1beta1
+kind: WMAPIGatewayCluster
+metadata:
+  name: wmapigateway
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    app.kubernetes.io/name: ibm-apiconnect
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  gatewayEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: wmapigateway-gw.{{ .Values.global.stackHost }}
+      secretName: wmapigateway-gw-tls-secret
+  uiEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: wmapigateway-ui.{{ .Values.global.stackHost }}
+      secretName: wmapigateway-ui-tls-secret
+  mgmtEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: wmapigateway-mgmt.{{ .Values.global.stackHost }}
+      secretName: wmapigateway-mgmt-tls-secret
+  mgmtClientSubjectDN: |
+    CN=wmapigateway-mgmt-client,O=cert-manager
+    CN=devportal-wmapigateway-client,O=cert-manager
+  profile: {{ .Values.wmapigateway.profile }}
+  version: {{ .Values.global.appProductVersion }}
+  imagePullSecrets:
+  - {{ .Values.global.imagePullSecret }}
+  imageRegistry: {{ include "apic.imageRegistry" (dict "subsystem" .Values.wmapigateway "global" .Values.global) }}
+  microServiceSecurity: certManager
+  certManagerIssuer:
+    name: "selfsigning-issuer"
+    kind: "Issuer"
+  {{- if .Values.wmapigateway.encryptionSecret.enabled }}
+  encryptionSecret:
+    secretName: {{ .Values.wmapigateway.encryptionSecret.secretName }}
+  {{- end }}
+  storage:
+    volumeClaimTemplate:
+      storageClassName: {{ include "apic.storageClass" (dict "subsystem" .Values.wmapigateway "global" .Values.global) }}
+      volumeSize: {{ .Values.wmapigateway.dataVolumeSize }}
+  license:
+    accept: {{ .Values.global.license.accept }}
+    license: {{ .Values.global.license.id | quote }}
+    metric: {{ .Values.global.license.metric }}
+    use: {{ .Values.global.license.use }}
+{{- end }}
+
+

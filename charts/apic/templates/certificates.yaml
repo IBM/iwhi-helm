@@ -1,0 +1,501 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if and .Values.certificates.enabled (or (eq $wave "2") (eq $wave "all")) }}
+
+# =============================================================================
+# Wave 2 – cert-manager Issuers and Certificates
+#
+# This template creates:
+#   1. selfsigning-issuer – Used by subsystem operators to create their CAs
+#   2. Single issuer hierarchy (if no external issuer provided) – for ALL certificates
+#
+# The selfsigning-issuer is always created for subsystem operators.
+# A single CA (apic-ca) and issuer (apic-issuer) are used for both:
+#   - Public ingress endpoints
+#   - Internal mTLS client certificates
+# This ensures all certificates share the same root CA for trust validation.
+#
+# All resources carry sync-wave "2" so ArgoCD applies them only after the
+# operator group and subscriptions (wave 1) are healthy.
+# =============================================================================
+
+---
+# Self-signing root issuer - always created, used by subsystem operators to create their own CA issuers for internal traffic
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigning-issuer
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/instance: "management"
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "selfsigning-issuer"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+
+{{- if not .Values.certificates.issuer.name }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ingress-ca
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/instance: "management"
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "ingress-ca"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  duration: 87600h # 10 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    rotationPolicy: Always
+  secretName: ingress-ca
+  commonName: "ingress-ca"
+  usages:
+  - digital signature
+  - key encipherment
+  - cert sign
+  isCA: true
+  issuerRef:
+    name: selfsigning-issuer
+    kind: Issuer
+  secretTemplate:
+    labels:
+      app.kubernetes.io/instance: "management"
+      app.kubernetes.io/managed-by: "ibm-apiconnect"
+      app.kubernetes.io/name: "ingress-ca"
+
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: ingress-issuer
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/instance: "management"
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "ingress-issuer"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: ingress-ca
+{{- end }}
+
+---
+# =============================================================================
+# mTLS Leaf Certificates (inter-subsystem communication)
+# All certificates use the internal issuer (CA-based)
+# =============================================================================
+
+---
+# Leaf certificate – portal-admin-client
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: portal-admin-client
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/instance: "management"
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "portal-admin-client"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  subject:
+    organizations:
+    - cert-manager
+  commonName: portal-admin-client
+  secretName: portal-admin-client
+  issuerRef:
+    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+  usages:
+  - "client auth"
+  - "signing"
+  - "key encipherment"
+  duration: 17520h # 2 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    rotationPolicy: Always
+  secretTemplate:
+    labels:
+      app.kubernetes.io/instance: "management"
+      app.kubernetes.io/managed-by: "ibm-apiconnect"
+      app.kubernetes.io/name: "portal-admin-client"
+
+---
+# Leaf certificate – gateway-client-client
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gateway-client-client
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/instance: "management"
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "gateway-client-client"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  subject:
+    organizations:
+    - cert-manager
+  commonName: gateway-client-client
+  secretName: gateway-client-client
+  issuerRef:
+    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+  usages:
+  - "client auth"
+  - "signing"
+  - "key encipherment"
+  duration: 17520h # 2 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    rotationPolicy: Always
+  secretTemplate:
+    labels:
+      app.kubernetes.io/instance: "management"
+      app.kubernetes.io/managed-by: "ibm-apiconnect"
+      app.kubernetes.io/name: "gateway-client-client"
+
+---
+# Leaf certificate – analytics-ingestion-client
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: analytics-ingestion-client
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/instance: "management"
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "analytics-ingestion-client"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  subject:
+    organizations:
+    - cert-manager
+  commonName: analytics-ingestion-client
+  secretName: analytics-ingestion-client
+  issuerRef:
+    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+  usages:
+  - "client auth"
+  - "signing"
+  - "key encipherment"
+  duration: 17520h # 2 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    rotationPolicy: Always
+  secretTemplate:
+    labels:
+      app.kubernetes.io/instance: "management"
+      app.kubernetes.io/managed-by: "ibm-apiconnect"
+      app.kubernetes.io/name: "analytics-ingestion-client"
+
+---
+# Leaf certificate – gateway-service
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gateway-service
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/instance: "gatewaycluster"
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "gateway-service"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  subject:
+    organizations:
+    - cert-manager
+  commonName: gateway-service
+  secretName: gateway-service
+  issuerRef:
+    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+  usages:
+  - "client auth"
+  - "signing"
+  - "key encipherment"
+  duration: 17520h # 2 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    rotationPolicy: Always
+  secretTemplate:
+    labels:
+      app.kubernetes.io/instance: "gatewaycluster"
+      app.kubernetes.io/managed-by: "ibm-apiconnect"
+      app.kubernetes.io/name: "gateway-service"
+
+---
+# Leaf certificate – gateway-peering
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gateway-peering
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/instance: "gatewaycluster"
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "gateway-peering"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  subject:
+    organizations:
+    - cert-manager
+  commonName: gateway-peering
+  secretName: gateway-peering
+  issuerRef:
+    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+  usages:
+  - "server auth"
+  - "client auth"
+  - "signing"
+  - "key encipherment"
+  duration: 17520h # 2 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    rotationPolicy: Always
+  secretTemplate:
+    labels:
+      app.kubernetes.io/instance: "gatewaycluster"
+      app.kubernetes.io/managed-by: "ibm-apiconnect"
+      app.kubernetes.io/name: "gateway-peering"
+
+---
+# Leaf certificate – devportal-admin-client
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: devportal-admin-client
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/instance: "management"
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "devportal-admin-client"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  subject:
+    organizations:
+      - cert-manager
+  commonName: devportal-admin-client
+  secretName: devportal-admin-client
+  issuerRef:
+    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+  usages:
+    - "client auth"
+    - "signing"
+    - "key encipherment"
+  duration: 17520h # 2 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    rotationPolicy: Always
+  secretTemplate:
+    labels:
+      app.kubernetes.io/instance: "management"
+      app.kubernetes.io/managed-by: "ibm-apiconnect"
+      app.kubernetes.io/name: "devportal-admin-client"
+
+---
+# Leaf certificate – devportal-wmapigateway-client
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: devportal-wmapigateway-client
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "devportal-wmapigateway-client"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  subject:
+    organizations:
+      - cert-manager
+  commonName: devportal-wmapigateway-client
+  secretName: devportal-wmapigateway-client
+  issuerRef:
+    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+  usages:
+    - "client auth"
+    - "signing"
+    - "key encipherment"
+  duration: 17520h # 2 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    rotationPolicy: Always
+  secretTemplate:
+    labels:
+      app.kubernetes.io/managed-by: "ibm-apiconnect"
+      app.kubernetes.io/name: "devportal-wmapigateway-client"
+
+---
+# Leaf certificate – wmapigateway-mgmt-client
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wmapigateway-mgmt-client
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/instance: "management"
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "wmapigateway-mgmt-client"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  subject:
+    organizations:
+      - cert-manager
+  commonName: wmapigateway-mgmt-client
+  secretName: wmapigateway-mgmt-client
+  issuerRef:
+    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+  usages:
+    - "client auth"
+    - "signing"
+    - "key encipherment"
+  duration: 17520h # 2 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    rotationPolicy: Always
+  secretTemplate:
+    labels:
+      app.kubernetes.io/instance: "management"
+      app.kubernetes.io/managed-by: "ibm-apiconnect"
+      app.kubernetes.io/name: "wmapigateway-mgmt-client"
+
+---
+# Leaf certificate – wmapigateway-devportal-client
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wmapigateway-devportal-client
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "wmapigateway-devportal-client"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  subject:
+    organizations:
+      - cert-manager
+  commonName: wmapigateway-devportal-client
+  secretName: wmapigateway-devportal-client
+  issuerRef:
+    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+  usages:
+    - "client auth"
+    - "signing"
+    - "key encipherment"
+  duration: 17520h # 2 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    rotationPolicy: Always
+  secretTemplate:
+    labels:
+      app.kubernetes.io/managed-by: "ibm-apiconnect"
+      app.kubernetes.io/name: "wmapigateway-devportal-client"
+
+---
+# Leaf certificate – nano-gateway-mgmt-client
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: nano-gateway-mgmt-client
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/instance: "management"
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "nano-gateway-mgmt-client"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  subject:
+    organizations:
+      - cert-manager
+  commonName: nano-gateway-mgmt-client
+  secretName: nano-gateway-mgmt-client
+  issuerRef:
+    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+  usages:
+    - "client auth"
+    - "signing"
+    - "key encipherment"
+  duration: 17520h # 2 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    rotationPolicy: Always
+  secretTemplate:
+    labels:
+      app.kubernetes.io/instance: "management"
+      app.kubernetes.io/managed-by: "ibm-apiconnect"
+      app.kubernetes.io/name: "nano-gateway-mgmt-client"
+
+---
+# Leaf certificate – federatedapimanagement-admin-client
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: federatedapimanagement-admin-client
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/instance: "management"
+    app.kubernetes.io/managed-by: "ibm-apiconnect"
+    app.kubernetes.io/name: "federatedapimanagement-admin-client"
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  subject:
+    organizations:
+      - cert-manager
+  commonName: federatedapimanagement-admin-client
+  secretName: federatedapimanagement-admin-client
+  issuerRef:
+    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+  usages:
+    - "client auth"
+    - "signing"
+    - "key encipherment"
+  duration: 17520h # 2 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    rotationPolicy: Always
+  secretTemplate:
+    labels:
+      app.kubernetes.io/instance: "management"
+      app.kubernetes.io/managed-by: "ibm-apiconnect"
+      app.kubernetes.io/name: "federatedapimanagement-admin-client"
+
+{{- end }}

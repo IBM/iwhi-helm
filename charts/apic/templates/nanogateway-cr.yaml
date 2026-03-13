@@ -1,0 +1,48 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if and .Values.nanogateway.enabled (or (eq $wave "3") (eq $wave "all")) }}
+# =============================================================================
+# Wave 3 – NanoGatewayCluster CR
+# =============================================================================
+apiVersion: nanogateway.apiconnect.ibm.com/v1beta1
+kind: NanoGatewayCluster
+metadata:
+  name: ngw
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  profile: {{ .Values.nanogateway.profile }}
+  version: {{ .Values.global.appProductVersion }}
+  imagePullSecrets:
+  - {{ .Values.global.imagePullSecret }}
+  imageRegistry: {{ include "apic.imageRegistry" (dict "subsystem" .Values.nanogateway "global" .Values.global) }}
+  microServiceSecurity: certManager
+  certManagerIssuer:
+    name: "selfsigning-issuer"
+    kind: "Issuer"
+  mgmtClientSubjectDN: CN=nano-gateway-mgmt-client,O=cert-manager
+  mgmtEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: apic-gateway-proxy.{{ .Values.global.stackHost }}
+      secretName: gateway-proxy-endpoint
+  redis:
+    hosts:
+    - {{ .Values.nanogateway.redis.host }}
+    port: {{ .Values.nanogateway.redis.port }}
+    mode: {{ .Values.nanogateway.redis.mode }}
+    credential:
+      secretName: {{ .Values.nanogateway.redis.credentialSecret }}
+    tls:
+      secretName: {{ .Values.nanogateway.redis.tlsSecret }}
+  gatewayDomain: nanogw.{{ .Values.global.stackHost }}
+  license:
+    accept: {{ .Values.global.license.accept }}
+    use: {{ .Values.global.license.use }}
+    license: {{ .Values.global.license.id | quote }}
+{{- end }}
+
+

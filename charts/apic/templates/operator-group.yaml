@@ -1,0 +1,20 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if and .Values.operatorGroup.enabled (or (eq $wave "1") (eq $wave "all")) }}
+# =============================================================================
+# Wave 1 – OperatorGroup
+# Scopes the operator installation to the target namespace.
+# Must be created before any Subscription in the same namespace.
+# =============================================================================
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: {{ .Values.operatorGroup.name }}
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  targetNamespaces:
+  - {{ include "apic.namespace" . }}
+{{- end }}

@@ -1,0 +1,113 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if not .Values.deployment.wave }}
+{{- fail "\n\n❌ ERROR: deployment.wave is required!\n\nYou must specify which deployment wave to execute.\n\nValid values:\n  - \"1\": Deploy operators only\n  - \"2\": Deploy certificates only (requires wave 1 complete)\n  - \"3\": Deploy subsystems only (requires wave 2 complete)\n  - \"all\": Deploy everything (for ArgoCD GitOps mode)\n\nExamples:\n  helm install apic-operators . -f values-dev.yaml --set deployment.wave=1 -n iwhi-dev\n  helm install apic-certificates . -f values-dev.yaml --set deployment.wave=2 -n iwhi-dev\n  helm install apic-subsystems . -f values-dev.yaml --set deployment.wave=3 -n iwhi-dev\n\nSee chart/README.md for detailed instructions.\n" }}
+{{- end }}
+
+================================================================================
+IBM API Connect - Deployment Wave {{ $wave }}
+================================================================================
+
+Namespace: {{ include "apic.namespace" . }}
+Release:   {{ .Release.Name }}
+
+{{- if eq $wave "1" }}
+
+✓ Wave 1: Operators deployed
+
+Components:
+{{- if .Values.operatorGroup.enabled }}
+  - OperatorGroup: {{ .Values.operatorGroup.name }}
+{{- end }}
+{{- if .Values.subscriptions.enabled }}
+  - Subscription: {{ .Values.subscriptions.apiconnect.name }}
+  - Subscription: {{ .Values.subscriptions.commonServices.name }}
+{{- end }}
+
+Next steps:
+  1. Wait until all CSVs show PHASE: Succeeded:
+     oc get csv -n {{ include "apic.namespace" . }} -l operators.coreos.com/ibm-common-service-operator.iwhi
+     oc get csv -n {{ include "apic.namespace" . }} -l operators.coreos.com/ibm-apiconnect.iwhi
+
+  3. Verify operator pods are running:
+     oc get pod -n {{ include "apic.namespace" . }} -l app.kubernetes.io/component=apiconnect-operator
+     oc get pod -n {{ include "apic.namespace" . }} -l app.kubernetes.io/instance=ibm-common-service-operator
+     oc get pod -n {{ include "apic.namespace" . }} -l app.kubernetes.io/instance=operand-deployment-lifecycle-manager
+
+  4. Once all operators are ready, deploy Wave 2 (Certificates):
+     helm upgrade --install apic-certificates . -f <your-values-file> --set deployment.wave=2 -n {{ include "apic.namespace" . }}
+
+{{- else if eq $wave "2" }}
+
+✓ Wave 2: Certificates deployed
+
+Components:
+{{- if .Values.certificates.enabled }}
+  - Certificate Issuer: {{ .Values.certificates.issuer.name | default "ingress-issuer" }} ({{ .Values.certificates.issuer.kind | default "Issuer" }})
+{{- end }}
+
+Next steps:
+  1. Verify all certificates show READY: True:
+     oc get certificate -n {{ include "apic.namespace" . }}
+
+  2. Deploy Wave 3 (Subsystems):
+     helm install apic-subsystems . -f <your-values-file> --set deployment.wave=3 -n {{ include "apic.namespace" . }}
+
+{{- else if eq $wave "3" }}
+
+✓ Wave 3: Subsystems deployed
+
+Components:
+{{- if .Values.management.enabled }}
+  - Management Cluster: management
+{{- end }}
+{{- if .Values.analytics.enabled }}
+  - Analytics Cluster: analytics
+{{- end }}
+{{- if .Values.devportal.enabled }}
+  - Developer Portal: devportal
+{{- end }}
+{{- if .Values.wmapigateway.enabled }}
+  - webMethods API Gateway: wmapigateway
+{{- end }}
+{{- if .Values.nanogateway.enabled }}
+  - Nano Gateway: nanogateway
+{{- end }}
+{{- if .Values.federatedapimanagement.enabled }}
+  - Federated API Management: fam
+{{- end }}
+
+Next steps:
+  1. Wait for all subsystems to show Phase: Ready (10-30 minutes)
+      oc get managementcluster.management.apiconnect.ibm.com/management -n {{ include "apic.namespace" . }}
+      oc get analyticscluster.analytics.apiconnect.ibm.com/analytics -n {{ include "apic.namespace" . }}
+      oc get wmapigatewaycluster.wmapigateway.apiconnect.ibm.com/wmapigateway -n {{ include "apic.namespace" . }}
+      oc get devportalcluster.devportal.apiconnect.ibm.com/devportal -n {{ include "apic.namespace" . }}
+      oc get federatedapimanagementcluster.federatedapimanagement.apiconnect.ibm.com/fam -n {{ include "apic.namespace" . }}
+
+      Notes: 
+      - the installation takes some time. You can also check if there are some crashed pods in the namespace.
+      - devportalcluster and federatedapimanagementcluster depend on analyticscluster, they will remain in status blocked until analyticscluster is ready.
+
+  2. Access the Cloud Manager:
+      https://admin.{{ .Values.global.stackHost }}
+      Username: admin
+      Password: oc get secret management-admin-secret -n {{ include "apic.namespace" . }} -o jsonpath='{.data.password}' | base64 -d && echo
+
+  3. Access the webMethods API Gateway:
+      https://wmapigateway-ui.{{ .Values.global.stackHost }}
+      Username: Administrator
+      Password: oc get secret wmapigateway-admin-secret -n {{ include "apic.namespace" . }} -o jsonpath='{.data.password}' | base64 -d && echo
+
+{{- else if eq $wave "all" }}
+
+✓ All components deployed (ArgoCD mode)
+
+This deployment includes all waves with ArgoCD sync-wave annotations.
+ArgoCD will manage the deployment order automatically.
+
+Monitor deployment:
+  oc get all -n {{ include "apic.namespace" . }}
+
+{{- end }}
+
+================================================================================

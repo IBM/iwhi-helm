@@ -1,0 +1,17 @@
+apiVersion: v2
+name: iwhi-apiconnect
+description: >
+  IBM webMethods Hybrid Integration (IWHI) – API Connect operator, certificates,
+  and subsystem custom resources for OpenShift Container Platform.
+type: application
+version: 1.0.0
+appVersion: "12.1.0.1"
+keywords:
+  - ibm
+  - apiconnect
+  - openshift
+  - gitops
+maintainers:
+  - name: IWHI Platform Team
+
+

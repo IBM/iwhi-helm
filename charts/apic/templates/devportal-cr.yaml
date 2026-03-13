@@ -1,0 +1,50 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if and .Values.devportal.enabled (or (eq $wave "3") (eq $wave "all")) }}
+# =============================================================================
+# Wave 3 – DevPortalCluster CR
+# =============================================================================
+apiVersion: devportal.apiconnect.ibm.com/v1beta1
+kind: DevPortalCluster
+metadata:
+  name: devportal
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  version: {{ .Values.global.appProductVersion }}
+  profile: {{ .Values.devportal.profile }}
+  imagePullSecrets:
+    - {{ .Values.global.imagePullSecret }}
+  imageRegistry: {{ .Values.global.imageRegistry }}
+  devportalAdminEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: api.devportal.{{ .Values.global.stackHost }}
+      secretName: devportal-admin
+  devportalUIEndpoint:
+    annotations:
+      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
+    hosts:
+    - name: devportal.{{ .Values.global.stackHost }}
+      secretName: devportal-web
+  adminClientSubjectDN: |
+    CN=devportal-admin-client,O=cert-manager
+    CN=wmapigateway-devportal-client,O=cert-manager
+  microServiceSecurity: certManager
+  certManagerIssuer:
+    name: "selfsigning-issuer"
+    kind: "Issuer"
+  analyticsRef:
+    name: {{ .Values.devportal.analyticsRef.name }}
+    namespace: {{ include "apic.analyticsRefNamespace" (dict "ref" .Values.devportal.analyticsRef "global" .Values.global) }}
+  isStandalone: false
+  license:
+    accept: {{ .Values.global.license.accept }}
+    use: {{ .Values.global.license.use }}
+    license: {{ .Values.global.license.id | quote }}
+{{- end }}
+
+
