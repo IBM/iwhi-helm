@@ -103,7 +103,6 @@ certificates:
   issuer:
     name: ""
     kind: Issuer
-    # Name of the CA secret in the namespace (required for Analytics platformCASecret)
     # defaults to "ingress-ca" for self-signed
     caSecretName: ""
 

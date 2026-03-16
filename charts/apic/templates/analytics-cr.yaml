@@ -18,8 +18,8 @@ spec:
   imagePullSecrets:
   - {{ .Values.global.imagePullSecret }}
   imageRegistry: {{ .Values.global.imageRegistry }}
-  mgmtPlatformEndpointCASecret:
-    secretName: {{ .Values.certificates.issuer.caSecretName | default "ingress-ca" }}
+  #mgmtPlatformEndpointCASecret:
+  #  secretName: {{ .Values.certificates.issuer.caSecretName | default "ingress-ca" }}
   microServiceSecurity: certManager
   certManagerIssuer:
     name: selfsigning-issuer

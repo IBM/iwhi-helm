@@ -96,7 +96,12 @@ Next steps:
   3. Access the webMethods API Gateway:
       https://wmapigateway-ui.{{ .Values.global.stackHost }}
       Username: Administrator
-      Password: oc get secret wmapigateway-admin-secret -n {{ include "apic.namespace" . }} -o jsonpath='{.data.password}' | base64 -d && echo
+      Password: manage
+
+  4. Access the webMethods Developer Portal:
+      https://devportal.{{ .Values.global.stackHost }}
+      Username: Administrator
+      Password: manage
 
 {{- else if eq $wave "all" }}
 

@@ -20,15 +20,16 @@ global:
   appProductVersion: "12.1.0.1"
   license:
     accept: true
-    use: production
-    id: L-PDZK-TWDH97
+    use: nonproduction
+    id: L-CXFF-XRSP3J
+    metric: MONTHLY_API_CALL
 
 certificates:
   enabled: true
   issuer:
     name: "custom-issuer"
     kind: Issuer
-    caSecretName: "custom-ca"
+#    caSecretName: "custom-ca"
 
 management:
   enabled: true
