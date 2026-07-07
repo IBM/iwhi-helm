@@ -1,0 +1,5 @@
+---
+# Matches values.yaml federatedapimanagement.adminSecret.{name,key} in the
+# apic Helm chart. Override if you changed those values.
+apic_fam_admin_secret_name: fam-admin-secret
+apic_fam_admin_secret_key: password

@@ -1,0 +1,68 @@
+---
+# Post-configuration of API Connect v12, following the order of
+# /Users/staillan/git/cp4i-demo/APICv12InstallGuide.md steps 7-16 (minus DP
+# API Gateway v5/v6 and CMS Developer Portal, not deployed by this stack).
+#
+# Run everything:
+#   ansible-playbook site.yml -e apic_porg_user_id=demo -e apic_porg_user_email=demo@example.com \
+#     -e apic_porg_user_fname=Demo -e apic_porg_user_lname=User
+#
+# Rerun a single step:
+#   ansible-playbook site.yml --tags nano_gateway
+#
+# Tags: initial_config, porg_lur, analytics, wm_api_gateway, nano_gateway,
+#       wm_devportal, fam, porg_gateways, porg_portal, config_info
+
+- name: API Connect post-configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: "Initial config (mail server, user registry)"
+      ansible.builtin.include_role:
+        name: apic_initial_config
+      tags: [initial_config]
+
+    - name: "Provider org + LUR user"
+      ansible.builtin.include_role:
+        name: apic_porg_lur
+      tags: [porg_lur]
+
+    - name: "Analytics topology"
+      ansible.builtin.include_role:
+        name: apic_analytics_config
+      tags: [analytics]
+
+    - name: "wM API Gateway topology"
+      ansible.builtin.include_role:
+        name: apic_wm_api_gateway
+      tags: [wm_api_gateway]
+
+    - name: "Nano Gateway topology"
+      ansible.builtin.include_role:
+        name: apic_nano_gateway
+      tags: [nano_gateway]
+
+    - name: "wM Developer Portal topology"
+      ansible.builtin.include_role:
+        name: apic_wm_devportal
+      tags: [wm_devportal]
+
+    - name: "Federated API Management config"
+      ansible.builtin.include_role:
+        name: apic_fam_config
+      tags: [fam]
+
+    - name: "Sandbox catalog: gateways"
+      ansible.builtin.include_role:
+        name: apic_porg_gateways
+      tags: [porg_gateways]
+
+    - name: "Sandbox catalog: portals"
+      ansible.builtin.include_role:
+        name: apic_porg_portal
+      tags: [porg_portal]
+
+    - name: "Summary of access info"
+      ansible.builtin.include_role:
+        name: apic_config_info
+      tags: [config_info]

@@ -1,0 +1,63 @@
+---
+# Logs in to the API Connect Platform API and sets apic_token + apic_server_url
+# facts. Include this with `import_tasks` after setting:
+#   login_instance   - management CR name whose platform-api route to use
+#   login_username   - realm username (admin, or a provider-org user)
+#   login_password   - matching password
+#   login_realm      - e.g. admin/default-idp-1 or provider/default-idp-2
+
+- name: "{{ login_instance }}: look up platform-api route"
+  kubernetes.core.k8s_info:
+    api_version: route.openshift.io/v1
+    kind: Route
+    name: "{{ login_instance }}-platform-api"
+    namespace: "{{ apic_namespace }}"
+  register: _apic_platform_api_route
+
+- name: "{{ login_instance }}: look up CLI credentials secret"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: "{{ login_instance }}-cli-cred"
+    namespace: "{{ apic_namespace }}"
+  register: _apic_cli_cred_secret
+  no_log: true
+
+- name: "{{ login_instance }}: set server URL and OAuth client facts"
+  ansible.builtin.set_fact:
+    apic_server_url: "https://{{ _apic_platform_api_route.resources[0].spec.host }}"
+    _apic_client_id: "{{ (_apic_cli_cred_secret.resources[0].data['credential.json'] | b64decode | from_json).id }}"
+    _apic_client_secret: "{{ (_apic_cli_cred_secret.resources[0].data['credential.json'] | b64decode | from_json).secret }}"
+  no_log: true
+
+- name: "{{ login_instance }}: log in as {{ login_username }}"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/token"
+    method: POST
+    validate_certs: "{{ apic_validate_certs }}"
+    headers:
+      Accept: application/json
+      Content-Type: application/json
+    body_format: json
+    body:
+      client_id: "{{ _apic_client_id }}"
+      client_secret: "{{ _apic_client_secret }}"
+      grant_type: password
+      password: "{{ login_password }}"
+      realm: "{{ login_realm }}"
+      username: "{{ login_username }}"
+    status_code: [200]
+  register: _apic_login_response
+  no_log: true
+
+- name: "{{ login_instance }}: set apic_token fact"
+  ansible.builtin.set_fact:
+    apic_token: "{{ _apic_login_response.json.access_token }}"
+    apic_auth_headers:
+      Accept: application/json
+      Authorization: "Bearer {{ _apic_login_response.json.access_token }}"
+    apic_auth_headers_json:
+      Accept: application/json
+      Content-Type: application/json
+      Authorization: "Bearer {{ _apic_login_response.json.access_token }}"
+  no_log: true

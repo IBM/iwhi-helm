@@ -1,0 +1,51 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if and .Values.valkey.enabled (or (eq $wave "3") (eq $wave "all")) }}
+# =============================================================================
+# Wave 3 – ValkeyCluster CR
+# =============================================================================
+---
+apiVersion: valkey.datapower.ibm.com/v1beta2
+kind: ValkeyCluster
+metadata:
+  name: {{ include "apic.valkeyClusterName" . }}
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  clusterSize: {{ .Values.valkey.clusterSize }}
+  clusterVersion: {{ .Values.valkey.clusterVersion }}
+  persistenceEnabled: {{ .Values.valkey.persistenceEnabled }}
+  valkeyLeader:
+    replicas: {{ .Values.valkey.leaderReplicas }}
+  valkeyFollower:
+    replicas: {{ .Values.valkey.followerReplicas }}
+  kubernetesConfig:
+    image: {{ .Values.valkey.image }}
+    imagePullPolicy: Always
+    imagePullSecrets:
+    - name: {{ .Values.global.imagePullSecret }}
+    valkeySecret:
+      name: {{ .Values.valkey.credentialSecret.name }}
+      key: {{ .Values.valkey.credentialSecret.key }}
+    persistentVolumeClaimRetentionPolicy:
+      whenDeleted: Delete
+      whenScaled: Retain
+  storage:
+    nodeConfVolume: true
+    nodeConfVolumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.valkey.nodeConfStorageSize }}
+        storageClassName: {{ include "apic.storageClass" (dict "subsystem" .Values.valkey "global" .Values.global) }}
+  TLS:
+    ca: ca.crt
+    cert: tls.crt
+    key: tls.key
+    secret:
+      secretName: {{ .Values.valkey.tlsSecret }}
+{{- end }}

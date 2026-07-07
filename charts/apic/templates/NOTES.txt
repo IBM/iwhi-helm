@@ -1,6 +1,6 @@
 {{- $wave := .Values.deployment.wave | toString }}
 {{- if not .Values.deployment.wave }}
-{{- fail "\n\n❌ ERROR: deployment.wave is required!\n\nYou must specify which deployment wave to execute.\n\nValid values:\n  - \"1\": Deploy operators only\n  - \"2\": Deploy certificates only (requires wave 1 complete)\n  - \"3\": Deploy subsystems only (requires wave 2 complete)\n  - \"all\": Deploy everything (for ArgoCD GitOps mode)\n\nExamples:\n  helm install apic-operators . -f values-dev.yaml --set deployment.wave=1 -n iwhi-dev\n  helm install apic-certificates . -f values-dev.yaml --set deployment.wave=2 -n iwhi-dev\n  helm install apic-subsystems . -f values-dev.yaml --set deployment.wave=3 -n iwhi-dev\n\nSee chart/README.md for detailed instructions.\n" }}
+{{- fail "\n\n❌ ERROR: deployment.wave is required!\n\nYou must specify which deployment wave to execute.\n\nValid values:\n  - \"1\": Deploy operators only\n  - \"2\": Deploy certificates only (requires wave 1 complete)\n  - \"3\": Deploy subsystems only (requires wave 2 complete)\n  - \"4\": Deploy post-configuration only (optional, requires wave 3 complete)\n  - \"all\": Deploy everything (for ArgoCD GitOps mode)\n\nExamples:\n  helm install apic-operators . -f values-dev.yaml --set deployment.wave=1 -n iwhi-dev\n  helm install apic-certificates . -f values-dev.yaml --set deployment.wave=2 -n iwhi-dev\n  helm install apic-subsystems . -f values-dev.yaml --set deployment.wave=3 -n iwhi-dev\n\nSee chart/README.md for detailed instructions.\n" }}
 {{- end }}
 
 ================================================================================
@@ -22,18 +22,29 @@ Components:
   - Subscription: {{ .Values.subscriptions.apiconnect.name }}
   - Subscription: {{ .Values.subscriptions.commonServices.name }}
 {{- end }}
+{{- if .Values.valkey.enabled }}
+  - Valkey Operator: valkey-operator
+{{- end }}
+{{- if .Values.nanogateway.enabled }}
+  - Nano Gateway Operator: datapower-nano-operator
+{{- end }}
 
 Next steps:
   1. Wait until all CSVs show PHASE: Succeeded:
-     oc get csv -n {{ include "apic.namespace" . }} -l operators.coreos.com/ibm-common-service-operator.iwhi
-     oc get csv -n {{ include "apic.namespace" . }} -l operators.coreos.com/ibm-apiconnect.iwhi
+     oc get csv -n {{ include "apic.namespace" . }}
 
-  3. Verify operator pods are running:
+  2. Verify operator pods are running:
      oc get pod -n {{ include "apic.namespace" . }} -l app.kubernetes.io/component=apiconnect-operator
      oc get pod -n {{ include "apic.namespace" . }} -l app.kubernetes.io/instance=ibm-common-service-operator
      oc get pod -n {{ include "apic.namespace" . }} -l app.kubernetes.io/instance=operand-deployment-lifecycle-manager
+{{- if .Values.valkey.enabled }}
+     oc get pod -n {{ include "apic.namespace" . }} -l name=valkey-operator
+{{- end }}
+{{- if .Values.nanogateway.enabled }}
+     oc get pod -n {{ include "apic.namespace" . }} -l app.kubernetes.io/name=datapower-nano-operator
+{{- end }}
 
-  4. Once all operators are ready, deploy Wave 2 (Certificates):
+  3. Once all operators are ready, deploy Wave 2 (Certificates):
      helm upgrade --install apic-certificates . -f <your-values-file> --set deployment.wave=2 -n {{ include "apic.namespace" . }}
 
 {{- else if eq $wave "2" }}
@@ -43,6 +54,10 @@ Next steps:
 Components:
 {{- if .Values.certificates.enabled }}
   - Certificate Issuer: {{ .Values.certificates.issuer.name | default "ingress-issuer" }} ({{ .Values.certificates.issuer.kind | default "Issuer" }})
+{{- end }}
+{{- if .Values.valkey.enabled }}
+  - Valkey CA/Issuer: valkey-issuer
+  - Valkey credential secret: {{ .Values.valkey.credentialSecret.name }}
 {{- end }}
 
 Next steps:
@@ -75,6 +90,9 @@ Components:
 {{- if .Values.federatedapimanagement.enabled }}
   - Federated API Management: fam
 {{- end }}
+{{- if .Values.valkey.enabled }}
+  - Valkey Cluster: {{ include "apic.valkeyClusterName" . }}
+{{- end }}
 
 Next steps:
   1. Wait for all subsystems to show Phase: Ready (10-30 minutes)
@@ -83,25 +101,81 @@ Next steps:
       oc get wmapigatewaycluster.wmapigateway.apiconnect.ibm.com/wmapigateway -n {{ include "apic.namespace" . }}
       oc get devportalcluster.devportal.apiconnect.ibm.com/devportal -n {{ include "apic.namespace" . }}
       oc get federatedapimanagementcluster.federatedapimanagement.apiconnect.ibm.com/fam -n {{ include "apic.namespace" . }}
+{{- if .Values.nanogateway.enabled }}
+      oc get nanogatewaycluster.nanogateway.apiconnect.ibm.com/ngw -n {{ include "apic.namespace" . }}
+{{- end }}
+{{- if .Values.valkey.enabled }}
+      oc get valkeycluster.valkey.datapower.ibm.com/{{ include "apic.valkeyClusterName" . }} -n {{ include "apic.namespace" . }}
+{{- end }}
 
       Notes: 
       - the installation takes some time. You can also check if there are some crashed pods in the namespace.
       - devportalcluster and federatedapimanagementcluster depend on analyticscluster, they will remain in status blocked until analyticscluster is ready.
 
+{{- if .Values.management.enabled }}
   2. Access the Cloud Manager:
       https://admin.{{ .Values.global.stackHost }}
       Username: admin
-      Password: oc get secret management-admin-secret -n {{ include "apic.namespace" . }} -o jsonpath='{.data.password}' | base64 -d && echo
+      Password: oc get secret {{ .Values.management.adminSecret.name }} -n {{ include "apic.namespace" . }} -o jsonpath='{.data.{{ .Values.management.adminSecret.key }}}' | base64 -d && echo
+{{- end }}
 
+{{- if .Values.wmapigateway.enabled }}
   3. Access the webMethods API Gateway:
       https://wmapigateway-ui.{{ .Values.global.stackHost }}
       Username: Administrator
-      Password: manage
+      Password: oc get secret {{ .Values.wmapigateway.adminSecret.name }} -n {{ include "apic.namespace" . }} -o jsonpath='{.data.{{ .Values.wmapigateway.adminSecret.key }}}' | base64 -d && echo
+{{- end }}
 
+{{- if .Values.devportal.enabled }}
   4. Access the webMethods Developer Portal:
       https://devportal.{{ .Values.global.stackHost }}
       Username: Administrator
-      Password: manage
+      Password: oc get secret devportal-admin-secret -n {{ include "apic.namespace" . }} -o jsonpath='{.data.password}' | base64 -d && echo
+{{- end }}
+
+  5. (Optional) Deploy Wave 4 (Post-configuration) to automate the Cloud
+     Manager setup (mail server, provider org, gateway/portal topology, FAM):
+     helm upgrade --install apic-postconfig . -f <your-values-file> \
+       --set deployment.wave=4 --set postConfig.enabled=true \
+       --set postConfig.image=<your-registry>/iwhi/apic-postconfig:1.0.0 \
+       --set postConfig.porgUser.id=<user-id> \
+       --set postConfig.porgUser.email=<user-email> \
+       --set postConfig.porgUser.firstName=<first-name> \
+       --set postConfig.porgUser.lastName=<last-name> \
+       -n {{ include "apic.namespace" . }}
+
+{{- else if eq $wave "4" }}
+
+✓ Wave 4: Post-configuration deployed
+
+Components:
+{{- if .Values.postConfig.enabled }}
+  - Job: apic-postconfig
+{{- end }}
+
+Next steps:
+  1. Monitor the Job:
+     oc logs -f job/apic-postconfig -n {{ include "apic.namespace" . }}
+     oc get job apic-postconfig -n {{ include "apic.namespace" . }}
+
+  2. Rerun a single step if needed (see README.md for the full tag list):
+     helm upgrade --install apic-postconfig . -f <your-values-file> \
+       --set deployment.wave=4 --set postConfig.enabled=true \
+       --set postConfig.tags={nano_gateway} \
+       -n {{ include "apic.namespace" . }}
+
+  3. Access API Manager (once the Job completes):
+      https://manager.{{ .Values.global.stackHost }}
+{{- if .Values.postConfig.providerOrg.admin.username }}
+      Username: {{ .Values.postConfig.providerOrg.admin.username }}
+{{- else }}
+      Username: (see postConfig.providerOrg.admin.username in your values file)
+{{- end }}
+      Password: oc get secret porg-lur-users-info -n {{ include "apic.namespace" . }} -o jsonpath='{.data.porg-lur-users-config\.json}' | base64 -d | jq .
+
+     The full endpoint/credential summary for every subsystem is also printed
+     at the end of the Job logs (role apic_config_info):
+     oc logs job/apic-postconfig -n {{ include "apic.namespace" . }} | tail -40
 
 {{- else if eq $wave "all" }}
 
@@ -112,6 +186,46 @@ ArgoCD will manage the deployment order automatically.
 
 Monitor deployment:
   oc get all -n {{ include "apic.namespace" . }}
+
+{{- if .Values.management.enabled }}
+
+Access the Cloud Manager:
+  https://admin.{{ .Values.global.stackHost }}
+  Username: admin
+  Password: oc get secret {{ .Values.management.adminSecret.name }} -n {{ include "apic.namespace" . }} -o jsonpath='{.data.{{ .Values.management.adminSecret.key }}}' | base64 -d && echo
+{{- end }}
+
+{{- if .Values.wmapigateway.enabled }}
+
+Access the webMethods API Gateway:
+  https://wmapigateway-ui.{{ .Values.global.stackHost }}
+  Username: Administrator
+  Password: oc get secret {{ .Values.wmapigateway.adminSecret.name }} -n {{ include "apic.namespace" . }} -o jsonpath='{.data.{{ .Values.wmapigateway.adminSecret.key }}}' | base64 -d && echo
+{{- end }}
+
+{{- if .Values.devportal.enabled }}
+
+Access the webMethods Developer Portal:
+  https://devportal.{{ .Values.global.stackHost }}
+  Username: Administrator
+  Password: oc get secret devportal-admin-secret -n {{ include "apic.namespace" . }} -o jsonpath='{.data.password}' | base64 -d && echo
+{{- end }}
+
+{{- if .Values.postConfig.enabled }}
+
+Access API Manager (once the apic-postconfig Job completes):
+  https://manager.{{ .Values.global.stackHost }}
+{{- if .Values.postConfig.providerOrg.admin.username }}
+  Username: {{ .Values.postConfig.providerOrg.admin.username }}
+{{- else }}
+  Username: (see postConfig.providerOrg.admin.username in your values file)
+{{- end }}
+  Password: oc get secret porg-lur-users-info -n {{ include "apic.namespace" . }} -o jsonpath='{.data.porg-lur-users-config\.json}' | base64 -d | jq .
+
+  The full endpoint/credential summary for every subsystem is also printed
+  at the end of the Job logs (role apic_config_info):
+  oc logs job/apic-postconfig -n {{ include "apic.namespace" . }} | tail -40
+{{- end }}
 
 {{- end }}
 

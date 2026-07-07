@@ -1,0 +1,28 @@
+---
+# Convenience wrapper: logs in as the admin user of apic_mgmt_instance,
+# reading the password from <apic_mgmt_instance>-admin-secret unless
+# apic_admin_password was already set (e.g. via -e or vault).
+
+- name: "Look up management admin secret"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: "{{ apic_mgmt_instance }}-admin-secret"
+    namespace: "{{ apic_namespace }}"
+  register: _apic_admin_secret
+  when: apic_admin_password is not defined
+  no_log: true
+
+- name: "Set admin password fact"
+  ansible.builtin.set_fact:
+    apic_admin_password: "{{ _apic_admin_secret.resources[0].data.password | b64decode }}"
+  when: apic_admin_password is not defined
+  no_log: true
+
+- name: "Log in as admin"
+  ansible.builtin.include_tasks: login.yml
+  vars:
+    login_instance: "{{ apic_mgmt_instance }}"
+    login_username: "{{ apic_admin_user }}"
+    login_password: "{{ apic_admin_password }}"
+    login_realm: "{{ apic_realm }}"

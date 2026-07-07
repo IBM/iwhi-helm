@@ -1,0 +1,5 @@
+---
+# Issuer used for the nano-gateway-app certificate (cert-manager). Matches
+# the apic Helm chart's ingress issuer name when certificates.issuer.name is
+# left empty (self-signed default: "ingress-issuer").
+apic_nanogateway_cert_issuer: ingress-issuer

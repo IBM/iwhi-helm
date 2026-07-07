@@ -18,7 +18,7 @@
 #   wave: ""  # Set via --set deployment.wave=X on command line
 
 global:
-  namespace: iwhi-dev
+  namespace: apic
   imagePullSecret: ibm-entitlement-key
   imageRegistry: cp.icr.io/cp/apic
   stackHost: iwhi-dev.apps.itz-r816vx.infra01-lb.fra02.techzone.ibm.com
@@ -59,15 +59,18 @@ wmapigateway:
     enabled: true
     secretName: wmapigateway-enc-key
 
+valkey:
+  enabled: false
+
 nanogateway:
   enabled: false
   profile: n1xc2.m4
-  imageRegistry: cp.icr.io/cp/datapower
+  imageRegistry: cp.icr.io/cp/apic
   redis:
-    # TODO: replace with the actual Redis/Valkey host before deployment
-    host: valkey.iwhi-dev.svc
+    # leave empty to use the in-chart Valkey deployment (set valkey.enabled: true above)
+    host: ""
     port: 6379
-    mode: standalone
+    mode: cluster
     credentialSecret: valkey-secret
     tlsSecret: valkey-tls
 

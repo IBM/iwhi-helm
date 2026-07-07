@@ -1,0 +1,28 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if and .Values.postConfig.enabled (or (eq $wave "4") (eq $wave "all")) }}
+# =============================================================================
+# Wave 4 – Post-configuration Ansible project ConfigMap
+# All files under ansible/ are flattened into a single ConfigMap (keys use
+# "__" in place of "/"), and reassembled into a real directory tree by an
+# initContainer in the postconfig Job (see postconfig-job.yaml) before
+# ansible-playbook runs. This avoids ConfigMap's lack of subdirectory support
+# while still letting the chart ship/update the roles via `helm upgrade`
+# instead of rebuilding a container image.
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apic-postconfig-ansible
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+data:
+  {{- range $path, $_ := .Files.Glob "ansible/**" }}
+  {{- $flatKey := $path | trimPrefix "ansible/" | replace "/" "__" }}
+  {{ $flatKey }}: |
+{{ $.Files.Get $path | indent 4 }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,122 @@
+---
+# Equivalent of cp4i-demo scripts/87w-apic-config-info.sh, restricted to the
+# subsystems this chart actually deploys (management, analytics, wM API
+# Gateway, Nano Gateway, wM Developer Portal, FAM). Unlike the original
+# script, passwords are never printed: only the secret name and the command
+# to retrieve it are shown.
+
+- name: "Look up all relevant routes"
+  kubernetes.core.k8s_info:
+    api_version: route.openshift.io/v1
+    kind: Route
+    name: "{{ item }}"
+    namespace: "{{ apic_namespace }}"
+  loop:
+    - "{{ apic_mgmt_instance }}-admin"
+    - "{{ apic_mgmt_instance }}-api-manager"
+    - "{{ apic_analytics_instance }}-ai-endpoint"
+    - "{{ apic_wmapigateway_instance }}-mgmt-endpoint"
+    - "{{ apic_wmapigateway_instance }}-gateway-endpoint"
+    - "{{ apic_wmapigateway_instance }}-ui-endpoint"
+    - "{{ apic_nanogateway_instance }}-mgmt-endpoint"
+    - "{{ apic_nanogateway_instance }}-nanogw"
+    - "{{ apic_wmdevportal_instance }}-devportal-admin"
+    - "{{ apic_wmdevportal_instance }}-devportal-web"
+    - "{{ apic_fam_instance }}-admin-endpoint"
+    - "{{ apic_fam_instance }}-ui-endpoint"
+  register: _apic_info_routes
+  ignore_errors: true
+  no_log: true
+
+- name: "Build a lookup map of route name to host"
+  ansible.builtin.set_fact:
+    _apic_routes: >-
+      {{ _apic_routes | default({})
+         | combine({item.item: (item.resources[0].spec.host if item.resources | length > 0 else '')}) }}
+  loop: "{{ _apic_info_routes.results }}"
+  no_log: true
+
+- name: "Read porg-lur-users-info state secret (optional)"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: "{{ apic_state_secret_name }}"
+    namespace: "{{ apic_namespace }}"
+  register: _apic_state_secret
+
+- name: "Decode PO user ids (no passwords)"
+  ansible.builtin.set_fact:
+    _apic_porg_user_ids: >-
+      {{ (_apic_state_secret.resources[0].data['porg-lur-users-config.json'] | b64decode | from_json).users
+         | map(attribute='userId') | list }}
+  when: _apic_state_secret.resources | length > 0
+
+- name: "Display API Connect access information"
+  ansible.builtin.debug:
+    msg: |
+      ==================================================================
+      API Connect access info (namespace {{ apic_namespace }})
+      ==================================================================
+      Cloud Manager:
+        UI URL: https://{{ _apic_routes[apic_mgmt_instance ~ '-admin'] | default('(not available)') }}
+        Admin user: admin
+        Admin password: oc get secret {{ apic_mgmt_instance }}-admin-secret -n {{ apic_namespace }} -o jsonpath='{{ '{{' }}.data.password{{ '}}' }}' | base64 -d
+
+      API Manager:
+        UI URL: https://{{ _apic_routes[apic_mgmt_instance ~ '-api-manager'] | default('(not available)') }}
+      {% if _apic_porg_user_ids is defined and _apic_porg_user_ids | length > 0 %}
+        Provider org users (password stored in secret {{ apic_state_secret_name }}):
+      {% for uid in _apic_porg_user_ids %}
+          - {{ uid }}
+      {% endfor %}
+        Retrieve a user's password with:
+          oc get secret {{ apic_state_secret_name }} -n {{ apic_namespace }} -o jsonpath='{{ '{{' }}.data.porg-lur-users-config\.json{{ '}}' }}' | base64 -d | jq .
+      {% endif %}
+
+      Analytics:
+      {% if _apic_routes[apic_analytics_instance ~ '-ai-endpoint'] | default('') | length > 0 %}
+        Ingestion endpoint: https://{{ _apic_routes[apic_analytics_instance ~ '-ai-endpoint'] }}
+      {% else %}
+        Not available.
+      {% endif %}
+
+      wM API Gateway:
+      {% if _apic_routes[apic_wmapigateway_instance ~ '-mgmt-endpoint'] | default('') | length > 0 %}
+        Management endpoint: https://{{ _apic_routes[apic_wmapigateway_instance ~ '-mgmt-endpoint'] }}
+        API endpoint: https://{{ _apic_routes[apic_wmapigateway_instance ~ '-gateway-endpoint'] | default('') }}
+        UI endpoint: https://{{ _apic_routes[apic_wmapigateway_instance ~ '-ui-endpoint'] | default('') }}
+        Admin user: Administrator
+        Admin password: oc get secret {{ apic_wmapigateway_instance }}-admin-secret -n {{ apic_namespace }} -o jsonpath='{{ '{{' }}.data.password{{ '}}' }}' | base64 -d
+      {% else %}
+        Not available.
+      {% endif %}
+
+      DP Nano Gateway:
+      {% if _apic_routes[apic_nanogateway_instance ~ '-mgmt-endpoint'] | default('') | length > 0 %}
+        Management endpoint: https://{{ _apic_routes[apic_nanogateway_instance ~ '-mgmt-endpoint'] }}
+        API endpoint (wildcard route): https://<subdomain>.{{ (_apic_routes[apic_nanogateway_instance ~ '-nanogw'] | default('')) | regex_replace('^wildcard\.', '') }}
+          Replace <subdomain> with your gateway service's configured subdomain.
+      {% else %}
+        Not available.
+      {% endif %}
+
+      wM Developer Portal:
+      {% if _apic_routes[apic_wmdevportal_instance ~ '-devportal-admin'] | default('') | length > 0 %}
+        Management endpoint: https://{{ _apic_routes[apic_wmdevportal_instance ~ '-devportal-admin'] }}
+        Website endpoint: https://{{ _apic_routes[apic_wmdevportal_instance ~ '-devportal-web'] | default('') }}
+        Admin user: Administrator
+        Admin password: oc get secret {{ apic_wmdevportal_instance }}-admin-secret -n {{ apic_namespace }} -o jsonpath='{{ '{{' }}.data.password{{ '}}' }}' | base64 -d
+      {% else %}
+        Not available.
+      {% endif %}
+
+      Federated API Management:
+      {% if _apic_routes[apic_fam_instance ~ '-admin-endpoint'] | default('') | length > 0 %}
+        Management endpoint: https://{{ _apic_routes[apic_fam_instance ~ '-admin-endpoint'] }}
+        UI endpoint: https://{{ _apic_routes[apic_fam_instance ~ '-ui-endpoint'] | default('') }}
+        Admin user: administrator
+        Admin password: oc get secret fam-admin-secret -n {{ apic_namespace }} -o jsonpath='{{ '{{' }}.data.password{{ '}}' }}' | base64 -d
+      {% else %}
+        Not available.
+      {% endif %}
+      ==================================================================

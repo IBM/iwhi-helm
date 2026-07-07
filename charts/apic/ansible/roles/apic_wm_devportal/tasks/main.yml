@@ -1,0 +1,110 @@
+---
+# Equivalent of cp4i-demo scripts/87r-apic-wm-dev-portal-config.sh:
+#   - add the wM Developer Portal to the Cloud Manager topology, if absent.
+
+- name: "Log in as admin"
+  ansible.builtin.include_role:
+    name: apic_common
+    tasks_from: admin_login.yml
+
+- name: "List existing portal services"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/orgs/admin/availability-zones/availability-zone-default/portal-services"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_portal_services
+
+- name: "Set portal service URL fact from existing definition"
+  ansible.builtin.set_fact:
+    _apic_svc_url: >-
+      {{ (_apic_portal_services.json.results
+          | selectattr('name', 'equalto', 'wm-devportal-service')
+          | map(attribute='url') | first) | default('', true) }}
+
+- name: "Create wM Developer Portal service block"
+  when: _apic_svc_url | length == 0
+  block:
+    - name: "List integration portal services"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/cloud/integrations/portal-service"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_integrations
+
+    - name: "Set integration service URL fact"
+      ansible.builtin.set_fact:
+        _apic_int_url: >-
+          {{ (_apic_integrations.json.results
+              | selectattr('name', 'equalto', 'devportal')
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "Fail if the devportal integration service is missing"
+      ansible.builtin.fail:
+        msg: >-
+          devportal integration service is not available in this API Connect
+          stack. Check the DevPortalCluster is Ready and try again.
+      when: _apic_int_url | length == 0
+
+    - name: "List TLS client profiles"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/orgs/admin/tls-client-profiles"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_tls_client_profiles
+
+    - name: "Set TLS client profile URL fact"
+      ansible.builtin.set_fact:
+        _apic_svc_tls_cpro_url: >-
+          {{ (_apic_tls_client_profiles.json.results
+              | selectattr('name', 'equalto', 'devportal-admin-client-default')
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "Fail if the devportal TLS client profile is missing"
+      ansible.builtin.fail:
+        msg: >-
+          wM Dev Portal TLS Client Profile 'devportal-admin-client-default'
+          is not available in this API Connect stack.
+      when: _apic_svc_tls_cpro_url | length == 0
+
+    - name: "Look up wM Dev Portal admin and web routes"
+      kubernetes.core.k8s_info:
+        api_version: route.openshift.io/v1
+        kind: Route
+        name: "{{ item }}"
+        namespace: "{{ apic_namespace }}"
+      loop:
+        - "{{ apic_wmdevportal_instance }}-devportal-admin"
+        - "{{ apic_wmdevportal_instance }}-devportal-web"
+      register: _apic_devportal_routes
+
+    - name: "Create the wM Dev Portal service"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/orgs/admin/availability-zones/availability-zone-default/portal-services"
+        method: POST
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers_json }}"
+        body_format: json
+        body:
+          type: portal_service
+          portal_service_type: devportal
+          api_version: "2.0.0"
+          name: wm-devportal-service
+          title: wm-devportal-service
+          web_endpoint_base: "https://{{ _apic_devportal_routes.results[1].resources[0].spec.host }}"
+          runtime_name: wm-devportal-service
+          runtime_id: wm-devportal-service-000
+          endpoint: "https://{{ _apic_devportal_routes.results[0].resources[0].spec.host }}"
+          endpoint_tls_client_profile_url: "{{ _apic_svc_tls_cpro_url }}"
+          integration_url: "{{ _apic_int_url }}"
+        status_code: [201]
+
+- name: "Existing portal service notice"
+  ansible.builtin.debug:
+    msg: "Portal service wm-devportal-service already exists."
+  when: _apic_svc_url | length > 0

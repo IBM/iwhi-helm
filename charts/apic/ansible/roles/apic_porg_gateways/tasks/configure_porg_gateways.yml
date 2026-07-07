@@ -1,0 +1,29 @@
+---
+# Runs once per provider org name ({{ _apic_porg_name }}).
+
+- name: "List gateway services visible in provider org {{ _apic_porg_name }}"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/orgs/{{ _apic_porg_name }}/gateway-services"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_porg_gateway_services
+
+- name: "List gateway services already configured in the Sandbox catalog"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/sandbox/configured-gateway-services"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_catalog_gateway_services
+
+- name: "Add each known gateway service to the Sandbox catalog if missing"
+  ansible.builtin.include_tasks: add_gateway_to_catalog.yml
+  loop:
+    - api-gateway-service
+    - nano-gateway-service
+    - wm-gateway-service
+  loop_control:
+    loop_var: _apic_gtwy_name

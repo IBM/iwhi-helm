@@ -1,0 +1,126 @@
+---
+# Equivalent of cp4i-demo scripts/87j-apic-initial-config.sh:
+#   - update the api-manager-lur user registry
+#   - create the mail server definition if absent
+#   - point cloud settings at that mail server
+# Run BEFORE apic_porg_lur: Cloud Manager must have a mail server connected
+# before a provider org (whose owner needs to receive account emails) is created.
+
+- name: "Validate mail server fields are set"
+  ansible.builtin.assert:
+    that:
+      - apic_mailserver_name | default('') | length > 0
+      - apic_mailserver_title | default('') | length > 0
+      - apic_mail_host | default('') | length > 0
+      - apic_mail_port | default(0) | int > 0
+    fail_msg: >-
+      postConfig.mailServer.name, .title, .host and .port must all be set
+      (see values.yaml) — there is no default mail server.
+    quiet: true
+
+# Only checked when the mail host points at the in-cluster MailPit instance
+# this chart documents as a prerequisite; skipped for any other SMTP server.
+- name: "Verify MailPit is deployed"
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: mailpit
+    namespace: mailpit
+  register: _mailpit_deployment
+  failed_when: _mailpit_deployment.resources | length == 0
+  when: "'mailpit' in apic_mail_host"
+
+- name: "Fail if MailPit is not ready"
+  ansible.builtin.fail:
+    msg: "MailPit deployment in namespace mailpit is not ready."
+  when:
+    - "'mailpit' in apic_mail_host"
+    - >
+      _mailpit_deployment.resources[0].status.conditions
+      | selectattr('type', 'equalto', 'Available')
+      | map(attribute='status')
+      | first != 'True'
+
+- name: "Log in as admin"
+  ansible.builtin.include_role:
+    name: apic_common
+    tasks_from: admin_login.yml
+
+- name: "Update api-manager-lur user registry"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/user-registries/admin/api-manager-lur"
+    method: PATCH
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers_json }}"
+    body_format: json
+    body:
+      visibility:
+        type: public
+    status_code: [200]
+
+- name: "List existing mail servers"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/orgs/admin/mail-servers"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_mail_servers
+
+- name: "Set mail server URL fact from existing definition"
+  ansible.builtin.set_fact:
+    _apic_mailserver_url: >-
+      {{ (_apic_mail_servers.json.results
+          | selectattr('name', 'equalto', apic_mailserver_name)
+          | map(attribute='url') | first) | default('', true) }}
+
+- name: "Create mail server definition"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/orgs/admin/mail-servers"
+    method: POST
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers_json }}"
+    body_format: json
+    # port/secure are passed through as-is (no `| int` / `| bool` filter):
+    # this ansible-core/Python runtime has been observed to coerce the
+    # `int` filter's output back to a string when used inline in a uri body
+    # dict (reproduced in isolation, independent of this role), which the
+    # API Connect mail-servers endpoint then rejects with "port must be
+    # integer". apic_mail_port/apic_mail_secure already arrive correctly
+    # typed (int/bool) from group_vars or the wave 4 Job's JSON extra-vars,
+    # so no cast is needed — just don't introduce one.
+    body:
+      type: mail_server
+      api_version: "2.0.0"
+      name: "{{ apic_mailserver_name }}"
+      title: "{{ apic_mailserver_title }}"
+      host: "{{ apic_mail_host }}"
+      port: "{{ apic_mail_port }}"
+      # Authenticated SMTP (username/password) is not supported here yet —
+      # see values.yaml postConfig.mailServer comment for why.
+      credentials: {}
+      secure: "{{ apic_mail_secure | default(false) }}"
+    status_code: [201]
+  register: _apic_mailserver_created
+  when: _apic_mailserver_url | length == 0
+
+- name: "Update mail server URL fact after creation"
+  ansible.builtin.set_fact:
+    _apic_mailserver_url: "{{ _apic_mailserver_created.json.url }}"
+  when: _apic_mailserver_url | length == 0
+
+- name: "Update cloud settings with the mail server"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/cloud/settings"
+    method: PUT
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers_json }}"
+    body_format: json
+    body:
+      mail_server_url: "{{ _apic_mailserver_url }}"
+      api_key_expires_in: "{{ apic_mail_api_key_expires_in | default(300) }}"
+      api_key_multiple_uses: "{{ apic_mail_api_key_multiple_uses | default(true) }}"
+      email_sender:
+        name: "{{ apic_mail_sender_name | default('APIC Administrator') }}"
+        address: "{{ apic_mail_sender_address | default('admin@apiconnect.net') }}"
+    status_code: [200]

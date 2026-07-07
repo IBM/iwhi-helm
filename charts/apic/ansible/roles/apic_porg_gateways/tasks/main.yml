@@ -1,0 +1,33 @@
+---
+# Equivalent of cp4i-demo scripts/87t-apic-porg-config-gtwys.sh:
+#   - for every user recorded in the porg-lur-users-info state secret,
+#     for every provider org they own, add every deployed gateway service
+#     (api-gateway-service, nano-gateway-service, wm-gateway-service) to the
+#     Sandbox catalog, if not already configured there.
+
+- name: "Read porg-lur-users-info state secret"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: "{{ apic_state_secret_name }}"
+    namespace: "{{ apic_namespace }}"
+  register: _apic_state_secret
+
+- name: "Fail if the state secret is missing"
+  ansible.builtin.fail:
+    msg: >-
+      Secret {{ apic_state_secret_name }} not found in namespace
+      {{ apic_namespace }}. Run role apic_porg_lur first.
+  when: _apic_state_secret.resources | length == 0
+
+- name: "Decode state document"
+  ansible.builtin.set_fact:
+    _apic_state_users: >-
+      {{ (_apic_state_secret.resources[0].data['porg-lur-users-config.json'] | b64decode | from_json).users }}
+
+- name: "Configure gateways for each user / provider org"
+  ansible.builtin.include_tasks: configure_user_porgs.yml
+  loop: "{{ _apic_state_users }}"
+  loop_control:
+    loop_var: _apic_porg_user
+  no_log: true

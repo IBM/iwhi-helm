@@ -1,0 +1,236 @@
+---
+# Equivalent of cp4i-demo scripts/87k-apic-new-porg-lur.sh:
+#   - create the demo user in the api-manager-lur registry if absent
+#   - create the provider org owned by that user if absent
+#   - persist user/porg state in the porg-lur-users-info secret, consumed
+#     later by apic_porg_gateways and apic_porg_portal
+
+- name: "Validate required user fields are set"
+  ansible.builtin.assert:
+    that:
+      - apic_porg_user_id | length > 0
+      - apic_porg_user_email | length > 0
+      - apic_porg_user_fname | length > 0
+      - apic_porg_user_lname | length > 0
+    fail_msg: >-
+      apic_porg_user_id, apic_porg_user_email, apic_porg_user_fname and
+      apic_porg_user_lname must all be set (see group_vars/all.yml).
+    quiet: true
+
+- name: "Log in as admin"
+  ansible.builtin.include_role:
+    name: apic_common
+    tasks_from: admin_login.yml
+
+- name: "List existing api-manager-lur users"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/user-registries/admin/api-manager-lur/users"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_lur_users
+
+- name: "Set user URL fact from existing definition"
+  ansible.builtin.set_fact:
+    _apic_user_url_existing: >-
+      {{ (_apic_lur_users.json.results
+          | selectattr('name', 'equalto', apic_porg_user_id)
+          | map(attribute='url') | first) | default('', true) }}
+
+- name: "New user block"
+  # IMPORTANT: this block's `when` is evaluated separately for EACH task
+  # inside it, not once for the whole block. None of these tasks may modify
+  # _apic_user_url_existing itself (that previously caused later tasks in
+  # this same block — e.g. "Persist state secret" — to be silently skipped
+  # right after the user was created, because the condition became false
+  # mid-block). _apic_user_url (a different variable, set once below) is
+  # what the rest of the role uses afterwards.
+  when: _apic_user_url_existing | length == 0
+  block:
+    - name: "Generate a password for the new user"
+      ansible.builtin.set_fact:
+        _apic_new_user_password: "{{ lookup('password', '/dev/null length=20 chars=ascii_lowercase,digits') }}"
+      no_log: true
+
+    - name: "Create the user in api-manager-lur"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/user-registries/admin/api-manager-lur/users"
+        method: POST
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers_json }}"
+        body_format: json
+        body:
+          type: user
+          api_version: "2.0.0"
+          name: "{{ apic_porg_user_id }}"
+          title: "{{ apic_porg_user_id }}"
+          identity_provider: default-idp-2
+          username: "{{ apic_porg_user_id }}"
+          email: "{{ apic_porg_user_email }}"
+          first_name: "{{ apic_porg_user_fname }}"
+          last_name: "{{ apic_porg_user_lname }}"
+          password: "{{ _apic_new_user_password }}"
+        status_code: [201]
+      register: _apic_user_created
+      no_log: true
+
+    - name: "Read existing porg-lur-users-info state secret"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: "{{ apic_state_secret_name }}"
+        namespace: "{{ apic_namespace }}"
+      register: _apic_state_secret
+
+    - name: "Build updated state document (new secret)"
+      ansible.builtin.set_fact:
+        _apic_state_doc: >-
+          {{ {'users': [{'userId': apic_porg_user_id, 'password': _apic_new_user_password, 'porgName': []}]} }}
+      when: _apic_state_secret.resources | length == 0
+
+    - name: "Build updated state document (append to existing secret)"
+      ansible.builtin.set_fact:
+        _apic_state_doc: >-
+          {{ (_apic_state_secret.resources[0].data['porg-lur-users-config.json'] | b64decode | from_json)
+             | combine({'users': (_apic_state_secret.resources[0].data['porg-lur-users-config.json'] | b64decode | from_json).users
+                        + [{'userId': apic_porg_user_id, 'password': _apic_new_user_password, 'porgName': []}]}) }}
+      when: _apic_state_secret.resources | length > 0
+
+    - name: "Persist state secret"
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ apic_state_secret_name }}"
+            namespace: "{{ apic_namespace }}"
+          stringData:
+            porg-lur-users-config.json: "{{ _apic_state_doc | to_json }}"
+      no_log: true
+
+    - name: "Report new user password"
+      ansible.builtin.debug:
+        msg: >-
+          User {{ apic_porg_user_id }} created. Password stored in secret
+          {{ apic_state_secret_name }} (namespace {{ apic_namespace }}).
+
+# Resolved once, after the block above (which must not touch this fact —
+# see the comment on "New user block"): whichever case applied, this is the
+# user URL the rest of the role uses.
+- name: "Resolve final user URL"
+  ansible.builtin.set_fact:
+    _apic_user_url: >-
+      {{ _apic_user_url_existing
+         if _apic_user_url_existing | length > 0
+         else _apic_user_created.json.url }}
+
+- name: "Existing user notice"
+  ansible.builtin.debug:
+    msg: "User {{ apic_porg_user_id }} already exists in api-manager-lur."
+  when: _apic_user_url_existing | length > 0
+
+- name: "Provider org block"
+  when: _apic_user_url | length > 0
+  block:
+    - name: "List existing provider orgs"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/cloud/orgs"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_orgs
+
+    - name: "Set provider org URL fact from existing definition"
+      ansible.builtin.set_fact:
+        _apic_porg_url: >-
+          {{ (_apic_orgs.json.results
+              | selectattr('name', 'equalto', apic_porg_name)
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "POST provider org"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/cloud/orgs"
+        method: POST
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers_json }}"
+        body_format: json
+        body:
+          type: org
+          org_type: provider
+          api_version: "2.0.0"
+          name: "{{ apic_porg_name }}"
+          title: "{{ apic_porg_title }}"
+          owner_url: "{{ _apic_user_url }}"
+        status_code: [201]
+      when: _apic_porg_url | length == 0
+
+    - name: "Existing provider org notice"
+      ansible.builtin.debug:
+        msg: "Provider org {{ apic_porg_name }} already exists."
+      when: _apic_porg_url | length > 0
+
+    # Runs regardless of whether the user/org were just created or already
+    # existed: a previous run may have created either without persisting
+    # state (e.g. it failed before reaching this point, as happened with an
+    # earlier version of this role), so the secret can't be assumed in sync.
+    - name: "Read state secret to ensure this user/org association is recorded"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: "{{ apic_state_secret_name }}"
+        namespace: "{{ apic_namespace }}"
+      register: _apic_state_secret_for_porg
+
+    - name: "Decode current state document, or start a fresh one"
+      ansible.builtin.set_fact:
+        _apic_state_users: >-
+          {{ ((_apic_state_secret_for_porg.resources[0].data['porg-lur-users-config.json'] | b64decode | from_json).users)
+             if (_apic_state_secret_for_porg.resources | length > 0)
+             else [] }}
+
+    - name: "Split into the matching user entry (if any) and the rest"
+      ansible.builtin.set_fact:
+        _apic_matching_user: >-
+          {{ (_apic_state_users | selectattr('userId', 'equalto', apic_porg_user_id) | first)
+             if (_apic_state_users | selectattr('userId', 'equalto', apic_porg_user_id) | list | length > 0)
+             else {'userId': apic_porg_user_id, 'password': '', 'porgName': []} }}
+        _apic_other_users: >-
+          {{ _apic_state_users | rejectattr('userId', 'equalto', apic_porg_user_id) | list }}
+
+    - name: "Warn if the user's password is not in the state secret"
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: user {{ apic_porg_user_id }} exists in api-manager-lur but
+          had no entry in secret {{ apic_state_secret_name }} (likely created
+          outside this chart, or by a run that failed before persisting
+          state). Recording the provider org association with an empty
+          password placeholder — apic_porg_gateways/porg_portal will not be
+          able to log in as this user until the secret is fixed manually.
+      when: _apic_matching_user.password | length == 0
+
+    - name: "Skip if this org is already recorded for this user"
+      ansible.builtin.set_fact:
+        _apic_porg_already_recorded: "{{ apic_porg_name in (_apic_matching_user.porgName | default([])) }}"
+
+    - name: "Add this porg name to the matching user's porgName list"
+      ansible.builtin.set_fact:
+        _apic_matching_user_updated: >-
+          {{ _apic_matching_user | combine({'porgName': (_apic_matching_user.porgName | default([])) + [apic_porg_name]}) }}
+      when: not _apic_porg_already_recorded
+
+    - name: "Persist updated state secret with this user/org association recorded"
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ apic_state_secret_name }}"
+            namespace: "{{ apic_namespace }}"
+          stringData:
+            porg-lur-users-config.json: "{{ {'users': _apic_other_users + [_apic_matching_user_updated]} | to_json }}"
+      no_log: true
+      when: not _apic_porg_already_recorded

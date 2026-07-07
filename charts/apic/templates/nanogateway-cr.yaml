@@ -31,7 +31,7 @@ spec:
       secretName: gateway-proxy-endpoint
   redis:
     hosts:
-    - {{ .Values.nanogateway.redis.host }}
+    - {{ include "apic.nanogatewayRedisHost" . }}
     port: {{ .Values.nanogateway.redis.port }}
     mode: {{ .Values.nanogateway.redis.mode }}
     credential:

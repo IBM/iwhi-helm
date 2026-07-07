@@ -1,0 +1,104 @@
+---
+# Equivalent of cp4i-demo scripts/87s-apic-fam-config.sh:
+#   - enable Federated API Management in cloud settings, if not already.
+
+- name: "Log in as admin"
+  ansible.builtin.include_role:
+    name: apic_common
+    tasks_from: admin_login.yml
+
+- name: "Get current cloud settings"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/cloud/settings"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_cloud_settings
+
+- name: "Configure Federated API Management block"
+  when: (_apic_cloud_settings.json.api_cp_setting.enabled | default(false)) != true
+  block:
+    - name: "List TLS client profiles"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/orgs/admin/tls-client-profiles"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_tls_client_profiles
+
+    - name: "Set TLS client profile URL fact"
+      ansible.builtin.set_fact:
+        _apic_svc_tls_cpro_url: >-
+          {{ (_apic_tls_client_profiles.json.results
+              | selectattr('name', 'equalto', 'control-plane-api-admin-client-default')
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "Fail if the FAM TLS client profile is missing"
+      ansible.builtin.fail:
+        msg: >-
+          Federated API Management TLS Client Profile
+          'control-plane-api-admin-client-default' is not available in this
+          API Connect stack.
+      when: _apic_svc_tls_cpro_url | length == 0
+
+    - name: "Look up FAM admin and UI routes"
+      kubernetes.core.k8s_info:
+        api_version: route.openshift.io/v1
+        kind: Route
+        name: "{{ item }}"
+        namespace: "{{ apic_namespace }}"
+      loop:
+        - "{{ apic_fam_instance }}-admin-endpoint"
+        - "{{ apic_fam_instance }}-ui-endpoint"
+      register: _apic_fam_routes
+
+    - name: "Look up the FAM admin secret"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: "{{ apic_fam_admin_secret_name }}"
+        namespace: "{{ apic_namespace }}"
+      register: _apic_fam_admin_secret
+      no_log: true
+
+    - name: "Set FAM admin credential facts"
+      ansible.builtin.set_fact:
+        _apic_fam_admin_user: "{{ _apic_fam_admin_secret.resources[0].data['username'] | b64decode }}"
+        _apic_fam_admin_password: "{{ _apic_fam_admin_secret.resources[0].data[apic_fam_admin_secret_key] | b64decode }}"
+      no_log: true
+
+    - name: "Enable Federated API Management in cloud settings"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/cloud/settings"
+        method: PUT
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers_json }}"
+        body_format: json
+        body:
+          api_cp_setting:
+            enabled: true
+            endpoint:
+              endpoint: "https://{{ _apic_fam_routes.results[0].resources[0].spec.host }}"
+              tls_client_profile_url: "{{ _apic_svc_tls_cpro_url }}"
+            credentials:
+              api_key: ""
+              password: "{{ _apic_fam_admin_password }}"
+              username: "{{ _apic_fam_admin_user }}"
+              instance_id: ""
+            ui_endpoint:
+              endpoint: "https://{{ _apic_fam_routes.results[1].resources[0].spec.host }}"
+              tls_client_profile_url: "{{ _apic_svc_tls_cpro_url }}"
+            apic_runtime_id: jgr-apic
+            apic_runtime_name: jgr-apic
+            authenticationType: mTLS
+            heartbeat_interval: 60
+            metrics_sync_interval: 120
+        status_code: [200]
+      no_log: true
+
+- name: "Already enabled notice"
+  ansible.builtin.debug:
+    msg: "Federated API Management is already enabled."
+  when: (_apic_cloud_settings.json.api_cp_setting.enabled | default(false)) == true

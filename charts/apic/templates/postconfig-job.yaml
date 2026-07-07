@@ -1,0 +1,129 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if and .Values.postConfig.enabled (or (eq $wave "4") (eq $wave "all")) }}
+# =============================================================================
+# Wave 4 – Post-configuration Job
+# Runs the Ansible playbook (site.yml) that automates the API Connect
+# post-install steps (mail server, provider org, gateway/portal topology,
+# FAM), equivalent to cp4i-demo scripts 87j/87k/87l/87o/87p/87r/87s/87t/87u/87w.
+#
+# The apic-postconfig-ansible ConfigMap (postconfig-configmaps.yaml) is
+# flattened (no subdirectories); the initContainer below reassembles the real
+# ansible/ directory tree from it before ansible-playbook runs.
+# =============================================================================
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: apic-postconfig
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  backoffLimit: {{ .Values.postConfig.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: apic-postconfig
+        {{- include "apic.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: apic-postconfig
+      {{- if .Values.postConfig.imagePullSecret }}
+      # Only needed if postConfig.image lives in an external registry that
+      # requires auth (e.g. cp.icr.io). Not required for an image pushed to
+      # this namespace's internal OpenShift ImageStream — the apic-postconfig
+      # ServiceAccount's auto-generated dockercfg already covers that.
+      imagePullSecrets:
+      - name: {{ .Values.postConfig.imagePullSecret }}
+      {{- end }}
+      initContainers:
+      - name: unpack-ansible-project
+        image: {{ .Values.postConfig.image }}
+        imagePullPolicy: Always
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          for f in /configmap/*; do
+            name=$(basename "$f")
+            relpath=$(echo "$name" | sed 's#__#/#g')
+            mkdir -p "/ansible/$(dirname "$relpath")"
+            cp "$f" "/ansible/$relpath"
+          done
+          find /ansible -type f
+        volumeMounts:
+        - name: configmap-flat
+          mountPath: /configmap
+        - name: ansible-project
+          mountPath: /ansible
+      containers:
+      - name: ansible-playbook
+        image: {{ .Values.postConfig.image }}
+        imagePullPolicy: Always
+        workingDir: /ansible
+        # Extra-vars are passed as a single JSON object (not repeated -e
+        # key=value pairs): Ansible's -e parser splits key=value pairs on
+        # whitespace even within one argv item, which corrupts any value
+        # containing spaces (e.g. postConfig.porgUser.orgTitle).
+        args:
+        - site.yml
+        - -e
+        - >-
+          {{ dict
+              "apic_namespace" (include "apic.namespace" .)
+              "apic_mgmt_instance" "management"
+              "apic_analytics_instance" "analytics"
+              "apic_wmapigateway_instance" "wmapigateway"
+              "apic_nanogateway_instance" "ngw"
+              "apic_wmdevportal_instance" "devportal"
+              "apic_fam_instance" "fam"
+              "apic_porg_name" .Values.postConfig.providerOrg.name
+              "apic_porg_title" .Values.postConfig.providerOrg.title
+              "apic_porg_user_id" .Values.postConfig.providerOrg.admin.username
+              "apic_porg_user_email" .Values.postConfig.providerOrg.admin.email
+              "apic_porg_user_fname" .Values.postConfig.providerOrg.admin.firstName
+              "apic_porg_user_lname" .Values.postConfig.providerOrg.admin.lastName
+              "apic_nanogateway_cert_issuer" (include "apic.issuerName" .)
+              "apic_mailserver_name" .Values.postConfig.mailServer.name
+              "apic_mailserver_title" .Values.postConfig.mailServer.title
+              "apic_mail_host" .Values.postConfig.mailServer.host
+              "apic_mail_port" (.Values.postConfig.mailServer.port | int)
+              "apic_mail_secure" .Values.postConfig.mailServer.secure
+              "apic_mail_sender_name" .Values.postConfig.mailServer.senderName
+              "apic_mail_sender_address" .Values.postConfig.mailServer.senderAddress
+              "apic_mail_api_key_expires_in" (.Values.postConfig.mailServer.apiKeyExpiresIn | int)
+              "apic_mail_api_key_multiple_uses" .Values.postConfig.mailServer.apiKeyMultipleUses
+            | toJson }}
+        {{- if .Values.postConfig.tags }}
+        - --tags
+        - {{ .Values.postConfig.tags | join "," }}
+        {{- end }}
+        env:
+        - name: ANSIBLE_CONFIG
+          value: /ansible/ansible.cfg
+        - name: ANSIBLE_LOCAL_TEMP
+          value: /tmp/.ansible/tmp
+        - name: HOME
+          value: /tmp
+        # kubernetes.core is installed at build time under the image's
+        # default $HOME (see Dockerfile). HOME is overridden to /tmp above
+        # (required: restricted-v2 assigns an arbitrary non-root UID with no
+        # writable home directory), which would otherwise make Ansible look
+        # for collections under /tmp/.ansible/collections instead.
+        - name: ANSIBLE_COLLECTIONS_PATH
+          value: /opt/app-root/src/.ansible/collections
+        volumeMounts:
+        - name: ansible-project
+          mountPath: /ansible
+        resources:
+          {{- toYaml .Values.postConfig.resources | nindent 10 }}
+      volumes:
+      - name: configmap-flat
+        configMap:
+          name: apic-postconfig-ansible
+      - name: ansible-project
+        emptyDir: {}
+{{- end }}

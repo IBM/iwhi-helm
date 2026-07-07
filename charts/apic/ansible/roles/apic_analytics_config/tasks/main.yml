@@ -1,0 +1,81 @@
+---
+# Equivalent of cp4i-demo scripts/87l-apic-analytics-config.sh:
+#   - add the AnalyticsCluster to the Cloud Manager topology, if absent.
+
+- name: "Log in as admin"
+  ansible.builtin.include_role:
+    name: apic_common
+    tasks_from: admin_login.yml
+
+- name: "List existing analytics services"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/orgs/admin/availability-zones/availability-zone-default/analytics-services"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_analytics_services
+
+- name: "Set analytics service URL fact from existing definition"
+  ansible.builtin.set_fact:
+    _apic_a7s_url: >-
+      {{ (_apic_analytics_services.json.results
+          | selectattr('name', 'equalto', 'analytics-service')
+          | map(attribute='url') | first) | default('', true) }}
+
+- name: "Create analytics service block"
+  when: _apic_a7s_url | length == 0
+  block:
+    - name: "List TLS client profiles"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/orgs/admin/tls-client-profiles"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_tls_client_profiles
+
+    - name: "Set analytics ingestion TLS client profile URL fact"
+      ansible.builtin.set_fact:
+        _apic_a7s_tls_cpro_url: >-
+          {{ (_apic_tls_client_profiles.json.results
+              | selectattr('name', 'equalto', 'analytics-ingestion-default')
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "Fail if the analytics ingestion TLS client profile is missing"
+      ansible.builtin.fail:
+        msg: >-
+          Analytics TLS Client Profile 'analytics-ingestion-default' is not
+          available in this API Connect stack. Check the AnalyticsCluster is
+          Ready and try again.
+      when: _apic_a7s_tls_cpro_url | length == 0
+
+    - name: "Look up the analytics ai-endpoint route"
+      kubernetes.core.k8s_info:
+        api_version: route.openshift.io/v1
+        kind: Route
+        name: "{{ apic_analytics_instance }}-ai-endpoint"
+        namespace: "{{ apic_namespace }}"
+      register: _apic_a7s_route
+
+    - name: "Create the analytics service definition"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/orgs/admin/availability-zones/availability-zone-default/analytics-services"
+        method: POST
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers_json }}"
+        body_format: json
+        body:
+          type: analytics_service
+          api_version: "2.0.0"
+          name: analytics-service
+          title: analytics-service
+          endpoint: "https://{{ _apic_a7s_route.resources[0].spec.host }}"
+          ingestion_endpoint_tls_client_profile_url: "{{ _apic_a7s_tls_cpro_url }}"
+          communication_from_apim_kind: external
+        status_code: [201]
+
+- name: "Existing analytics service notice"
+  ansible.builtin.debug:
+    msg: "Analytics service already exists."
+  when: _apic_a7s_url | length > 0

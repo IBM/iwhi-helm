@@ -1,0 +1,47 @@
+---
+# Runs once per fixed gateway service name ({{ _apic_gtwy_name }}), within
+# provider org {{ _apic_porg_name }}.
+
+- name: "Set already-configured URL fact for {{ _apic_gtwy_name }}"
+  ansible.builtin.set_fact:
+    _apic_catalog_gtwy_url: >-
+      {{ (_apic_catalog_gateway_services.json.results
+          | selectattr('name', 'equalto', _apic_gtwy_name)
+          | map(attribute='url') | first) | default('', true) }}
+
+- name: "Set org-visible URL fact for {{ _apic_gtwy_name }}"
+  ansible.builtin.set_fact:
+    _apic_porg_gtwy_url: >-
+      {{ (_apic_porg_gateway_services.json.results
+          | selectattr('name', 'equalto', _apic_gtwy_name)
+          | map(attribute='url') | first) | default('', true) }}
+
+- name: "Add {{ _apic_gtwy_name }} to the Sandbox catalog of {{ _apic_porg_name }}"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/sandbox/configured-gateway-services"
+    method: POST
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers_json }}"
+    body_format: json
+    body:
+      gateway_service_url: "{{ _apic_porg_gtwy_url }}"
+    status_code: [201]
+  when:
+    - _apic_catalog_gtwy_url | length == 0
+    - _apic_porg_gtwy_url | length > 0
+
+- name: "{{ _apic_gtwy_name }} not deployed notice"
+  ansible.builtin.debug:
+    msg: >-
+      Gateway service {{ _apic_gtwy_name }} is not available in this
+      environment; skipping for provider org {{ _apic_porg_name }}.
+  when:
+    - _apic_catalog_gtwy_url | length == 0
+    - _apic_porg_gtwy_url | length == 0
+
+- name: "{{ _apic_gtwy_name }} already configured notice"
+  ansible.builtin.debug:
+    msg: >-
+      Gateway service {{ _apic_gtwy_name }} already configured in the Sandbox
+      catalog of provider org {{ _apic_porg_name }}.
+  when: _apic_catalog_gtwy_url | length > 0

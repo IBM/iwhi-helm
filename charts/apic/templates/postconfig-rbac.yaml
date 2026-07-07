@@ -1,0 +1,125 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- if and .Values.postConfig.enabled (or (eq $wave "4") (eq $wave "all")) }}
+# =============================================================================
+# Wave 4 – Post-configuration Job RBAC
+# Read-only access to Secrets and Routes in this namespace, and read/write on
+# the porg-lur-users-info state Secret (created by the apic_porg_lur role).
+# =============================================================================
+
+---
+apiVersion: v1
+kind: ServiceAccount
+automountServiceAccountToken: true
+metadata:
+  name: apic-postconfig
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: apic-postconfig
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - route.openshift.io
+  resources:
+  - routes
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  verbs:
+  - get
+  - list
+  - create
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: apic-postconfig
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: apic-postconfig
+  namespace: {{ include "apic.namespace" . }}
+roleRef:
+  kind: Role
+  name: apic-postconfig
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Cross-namespace access to read the MailPit Deployment status (role
+# apic_initial_config checks it's Ready before connecting Cloud Manager to
+# it). MailPit itself is not managed by this chart.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: apic-postconfig-mailpit-reader
+  namespace: {{ .Values.postConfig.mailpitNamespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: apic-postconfig-mailpit-reader
+  namespace: {{ .Values.postConfig.mailpitNamespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: apic-postconfig
+  namespace: {{ include "apic.namespace" . }}
+roleRef:
+  kind: Role
+  name: apic-postconfig-mailpit-reader
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

@@ -88,6 +88,93 @@ spec:
     secretName: ingress-ca
 {{- end }}
 
+{{- if .Values.valkey.enabled }}
+---
+# =============================================================================
+# Valkey TLS – dedicated CA + Issuer
+#
+# Valkey requires its own CA-backed issuer (distinct from ingress-issuer) so
+# that the leaf certificate's SANs can cover all ValkeyCluster service names.
+# Hierarchy: selfsigning-issuer -> valkey-ca -> valkey-issuer -> valkey-tls
+# =============================================================================
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: valkey-ca
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  isCA: true
+  commonName: ValkeyCA
+  secretName: valkey-ca
+  duration: 87600h   # 10 years
+  renewBefore: 720h  # 30 days
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    name: selfsigning-issuer
+    kind: Issuer
+
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: valkey-issuer
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: valkey-ca
+
+---
+{{- $ns := include "apic.namespace" . }}
+{{- $svc := include "apic.valkeyClusterName" . }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: valkey-tls
+  namespace: {{ $ns }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  commonName: {{ $svc }}.{{ $ns }}.svc.cluster.local
+  secretName: {{ .Values.valkey.tlsSecret }}
+  duration: 17520h   # 2 years
+  renewBefore: 720h  # 30 days
+  privateKey:
+    rotationPolicy: Always
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+  - client auth
+  dnsNames:
+  - {{ $svc }}.{{ $ns }}.svc.cluster.local
+  - {{ $svc }}.{{ $ns }}.svc
+  - {{ $svc }}-headless.{{ $ns }}.svc.cluster.local
+  - {{ $svc }}-headless.{{ $ns }}.svc
+  - {{ $svc }}-headless
+  - {{ $svc }}
+  - {{ $svc }}-leader-headless.{{ $ns }}.svc.cluster.local
+  - {{ $svc }}-leader-headless.{{ $ns }}.svc
+  - {{ $svc }}-leader-headless
+  - {{ $svc }}-leader.{{ $ns }}.svc.cluster.local
+  - {{ $svc }}-leader.{{ $ns }}.svc
+  - {{ $svc }}-leader
+  issuerRef:
+    name: valkey-issuer
+    kind: Issuer
+{{- end }}
+
 ---
 # =============================================================================
 # mTLS Leaf Certificates (inter-subsystem communication)

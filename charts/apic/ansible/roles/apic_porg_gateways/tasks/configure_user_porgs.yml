@@ -1,0 +1,19 @@
+---
+# Runs once per user entry from the state secret ({{ _apic_porg_user }}).
+
+- name: "Log in as provider org user {{ _apic_porg_user.userId }}"
+  ansible.builtin.include_role:
+    name: apic_common
+    tasks_from: login.yml
+  vars:
+    login_instance: "{{ apic_mgmt_instance }}"
+    login_username: "{{ _apic_porg_user.userId }}"
+    login_password: "{{ _apic_porg_user.password }}"
+    login_realm: provider/default-idp-2
+  no_log: true
+
+- name: "Configure gateways in each provider org owned by {{ _apic_porg_user.userId }}"
+  ansible.builtin.include_tasks: configure_porg_gateways.yml
+  loop: "{{ _apic_porg_user.porgName | default([]) }}"
+  loop_control:
+    loop_var: _apic_porg_name

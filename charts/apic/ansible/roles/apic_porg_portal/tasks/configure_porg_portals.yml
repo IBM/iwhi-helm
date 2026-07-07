@@ -1,0 +1,27 @@
+---
+# Runs once per provider org name ({{ _apic_porg_name }}).
+
+- name: "List portal services visible in provider org {{ _apic_porg_name }}"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/orgs/{{ _apic_porg_name }}/portal-services"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_porg_portal_services
+
+- name: "List portal services already configured in the Sandbox catalog"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/sandbox/configured-portal-services"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_catalog_portal_services
+
+- name: "Add each known portal service to the Sandbox catalog if missing"
+  ansible.builtin.include_tasks: add_portal_to_catalog.yml
+  loop:
+    - wm-devportal-service
+  loop_control:
+    loop_var: _apic_ptl_name

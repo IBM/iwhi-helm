@@ -1,0 +1,319 @@
+---
+# Equivalent of cp4i-demo scripts/87p-apic-dp-nano-gateway-config.sh:
+#   - create the nano-gateway-app cert-manager Certificate if absent
+#   - add the Nano Gateway to the Cloud Manager topology, if absent
+#     (integration service + TLS client profile must already exist; the TLS
+#     server profile + keystore are created here if missing).
+
+- name: "Verify the Nano Gateway operator is deployed and ready"
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: datapower-nano-operator
+    namespace: "{{ apic_namespace }}"
+  register: _apic_nano_operator
+
+- name: "Fail if the Nano Gateway operator is missing or not ready"
+  ansible.builtin.fail:
+    msg: "datapower-nano-operator Deployment is not installed or not ready in namespace {{ apic_namespace }}."
+  when: >
+    _apic_nano_operator.resources | length == 0 or
+    (_apic_nano_operator.resources[0].status.conditions
+     | selectattr('type', 'equalto', 'Available')
+     | map(attribute='status') | first) != 'True'
+
+- name: "Look up the Nano Gateway gateway route (for the certificate DNS name)"
+  kubernetes.core.k8s_info:
+    api_version: route.openshift.io/v1
+    kind: Route
+    name: "{{ apic_nanogateway_instance }}-nanogw"
+    namespace: "{{ apic_namespace }}"
+  register: _apic_nanogw_route
+
+- name: "Set Nano Gateway wildcard DNS fact"
+  ansible.builtin.set_fact:
+    _apic_nanogw_dns: "{{ _apic_nanogw_route.resources[0].spec.host | regex_replace('wildcard', '*') }}"
+
+- name: "Check whether the nano-gateway-app-tls secret already exists"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: nano-gateway-app-tls
+    namespace: "{{ apic_namespace }}"
+  register: _apic_nanogw_tls_secret
+
+- name: "Create the nano-gateway-app Certificate"
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: cert-manager.io/v1
+      kind: Certificate
+      metadata:
+        name: nano-gateway-app
+        namespace: "{{ apic_namespace }}"
+      spec:
+        commonName: nano-gateway-app
+        secretName: nano-gateway-app-tls
+        isCA: false
+        dnsNames:
+          - "{{ _apic_nanogw_dns }}"
+        issuerRef:
+          name: "{{ apic_nanogateway_cert_issuer }}"
+  when: _apic_nanogw_tls_secret.resources | length == 0
+
+- name: "Wait for the nano-gateway-app-tls secret to be created"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: nano-gateway-app-tls
+    namespace: "{{ apic_namespace }}"
+  register: _apic_nanogw_tls_secret
+  until: _apic_nanogw_tls_secret.resources | length > 0
+  retries: 30
+  delay: 5
+  when: _apic_nanogw_tls_secret.resources | length == 0
+
+- name: "Log in as admin"
+  ansible.builtin.include_role:
+    name: apic_common
+    tasks_from: admin_login.yml
+
+- name: "List existing gateway services"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/orgs/admin/availability-zones/availability-zone-default/gateway-services"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_gateway_services
+
+- name: "Set gateway service URL fact from existing definition"
+  ansible.builtin.set_fact:
+    _apic_svc_url: >-
+      {{ (_apic_gateway_services.json.results
+          | selectattr('name', 'equalto', 'nano-gateway-service')
+          | map(attribute='url') | first) | default('', true) }}
+
+- name: "Create Nano Gateway service block"
+  when: _apic_svc_url | length == 0
+  block:
+    - name: "List integration gateway services"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/cloud/integrations/gateway-service"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_integrations
+
+    - name: "Set integration service URL fact"
+      ansible.builtin.set_fact:
+        _apic_int_url: >-
+          {{ (_apic_integrations.json.results
+              | selectattr('name', 'equalto', 'datapower-nano-gateway')
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "Fail if the Nano Gateway integration service is missing"
+      ansible.builtin.fail:
+        msg: >-
+          DP Nano Gateway integration service is not available in this API
+          Connect stack. Check the NanoGatewayCluster is Ready and try again.
+      when: _apic_int_url | length == 0
+
+    - name: "List TLS client profiles"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/orgs/admin/tls-client-profiles"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_tls_client_profiles
+
+    - name: "Set TLS client profile URL fact"
+      ansible.builtin.set_fact:
+        _apic_svc_tls_cpro_url: >-
+          {{ (_apic_tls_client_profiles.json.results
+              | selectattr('name', 'equalto', 'datapower-nano-gateway-mgmt-client-default')
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "Fail if the Nano Gateway TLS client profile is missing"
+      ansible.builtin.fail:
+        msg: >-
+          DP Nano Gateway TLS Client Profile
+          'datapower-nano-gateway-mgmt-client-default' is not available in
+          this API Connect stack.
+      when: _apic_svc_tls_cpro_url | length == 0
+
+    - name: "List TLS server profiles"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/orgs/admin/tls-server-profiles"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_tls_server_profiles
+
+    - name: "Set Nano Gateway TLS server profile URL fact"
+      ansible.builtin.set_fact:
+        _apic_svc_tls_spro_url: >-
+          {{ (_apic_tls_server_profiles.json.results
+              | selectattr('name', 'equalto', 'datapower-nano-gateway-tls-server-profile')
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "Create the TLS server profile (keystore + profile) if missing"
+      when: _apic_svc_tls_spro_url | length == 0
+      block:
+        - name: "List keystores"
+          ansible.builtin.uri:
+            url: "{{ apic_server_url }}/api/orgs/admin/keystores"
+            method: GET
+            validate_certs: "{{ apic_validate_certs }}"
+            headers: "{{ apic_auth_headers }}"
+            status_code: [200]
+          register: _apic_keystores
+
+        - name: "Set keystore URL fact"
+          ansible.builtin.set_fact:
+            _apic_keystore_url: >-
+              {{ (_apic_keystores.json.results
+                  | selectattr('name', 'equalto', 'datapower-nano-gateway-keystore')
+                  | map(attribute='url') | first) | default('', true) }}
+
+        - name: "Create the keystore from the nano-gateway-app-tls certificate"
+          when: _apic_keystore_url | length == 0
+          block:
+            - name: "Build the combined PEM (cert + key)"
+              ansible.builtin.set_fact:
+                _apic_ngw_pem: >-
+                  {{ (_apic_nanogw_tls_secret.resources[0].data['tls.crt'] | b64decode)
+                     + (_apic_nanogw_tls_secret.resources[0].data['tls.key'] | b64decode) }}
+              no_log: true
+
+            - name: "POST the keystore"
+              ansible.builtin.uri:
+                url: "{{ apic_server_url }}/api/orgs/admin/keystores"
+                method: POST
+                validate_certs: "{{ apic_validate_certs }}"
+                headers: "{{ apic_auth_headers_json }}"
+                body_format: json
+                body:
+                  title: "DataPower Nano Gateway keystore"
+                  name: datapower-nano-gateway-keystore
+                  summary: "DataPower Nano Gateway default keystore"
+                  keystore: "{{ _apic_ngw_pem }}"
+                status_code: [201]
+              register: _apic_keystore_created
+              no_log: true
+
+            - name: "Set keystore URL fact after creation"
+              ansible.builtin.set_fact:
+                _apic_keystore_url: "{{ _apic_keystore_created.json.url }}"
+
+        - name: "POST the TLS server profile"
+          ansible.builtin.uri:
+            url: "{{ apic_server_url }}/api/orgs/admin/tls-server-profiles"
+            method: POST
+            validate_certs: "{{ apic_validate_certs }}"
+            headers: "{{ apic_auth_headers_json }}"
+            body_format: json
+            body:
+              type: tls_server_profile
+              api_version: "2.0.0"
+              name: datapower-nano-gateway-tls-server-profile
+              version: "1.0.0"
+              title: "DataPower Nano Gateway TLS server profile"
+              summary: "DataPower Nano Gateway default TLS server profile"
+              protocols: [tls_v1.2, tls_v1.3]
+              ciphers:
+                - TLS_AES_256_GCM_SHA384
+                - TLS_CHACHA20_POLY1305_SHA256
+                - TLS_AES_128_GCM_SHA256
+                - ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+                - ECDHE_ECDSA_WITH_AES_256_CBC_SHA384
+                - ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+                - ECDHE_ECDSA_WITH_AES_128_CBC_SHA256
+                - ECDHE_ECDSA_WITH_AES_256_CBC_SHA
+                - ECDHE_ECDSA_WITH_AES_128_CBC_SHA
+                - ECDHE_RSA_WITH_AES_256_GCM_SHA384
+                - ECDHE_RSA_WITH_AES_256_CBC_SHA384
+                - ECDHE_RSA_WITH_AES_128_GCM_SHA256
+                - ECDHE_RSA_WITH_AES_128_CBC_SHA256
+                - ECDHE_RSA_WITH_AES_256_CBC_SHA
+                - ECDHE_RSA_WITH_AES_128_CBC_SHA
+                - DHE_RSA_WITH_AES_256_GCM_SHA384
+                - DHE_RSA_WITH_AES_256_CBC_SHA256
+                - DHE_RSA_WITH_AES_128_GCM_SHA256
+                - DHE_RSA_WITH_AES_128_CBC_SHA256
+                - DHE_RSA_WITH_AES_256_CBC_SHA
+                - DHE_RSA_WITH_AES_128_CBC_SHA
+              elliptic_curve: [secp521r1, secp384r1, secp256k1]
+              mutual_authentication: none
+              limit_renegotiation: true
+              keystore_url: "{{ _apic_keystore_url }}"
+            status_code: [201]
+          register: _apic_tls_server_profile_created
+
+        - name: "Set TLS server profile URL fact after creation"
+          ansible.builtin.set_fact:
+            _apic_svc_tls_spro_url: "{{ _apic_tls_server_profile_created.json.url }}"
+
+    - name: "List analytics services"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/orgs/admin/availability-zones/availability-zone-default/analytics-services"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_analytics_services
+
+    - name: "Set analytics service URL fact (optional)"
+      ansible.builtin.set_fact:
+        _apic_a7s_url: >-
+          {{ (_apic_analytics_services.json.results
+              | selectattr('name', 'equalto', 'analytics-service')
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "Look up the Nano Gateway mgmt route"
+      kubernetes.core.k8s_info:
+        api_version: route.openshift.io/v1
+        kind: Route
+        name: "{{ apic_nanogateway_instance }}-mgmt-endpoint"
+        namespace: "{{ apic_namespace }}"
+      register: _apic_nanogw_mgmt_route
+
+    - name: "Build the gateway service definition body"
+      ansible.builtin.set_fact:
+        _apic_gtwy_svc_body: >-
+          {{
+            {
+              'type': 'gateway_service',
+              'gateway_service_type': 'datapower-nano-gateway',
+              'api_version': '2.0.0',
+              'name': 'nano-gateway-service',
+              'title': 'nano-gateway-service',
+              'integration_url': _apic_int_url,
+              'endpoint': 'https://' + _apic_nanogw_mgmt_route.resources[0].spec.host,
+              'api_endpoint_base': 'https://' + _apic_nanogw_dns,
+              'tls_client_profile_url': _apic_svc_tls_cpro_url,
+              'sni': [{'host': '*', 'tls_server_profile_url': _apic_svc_tls_spro_url}],
+              'communication_kind': 'external',
+              'communication_to_analytics_kind': 'external',
+              'communication_to_analytics_with_jwt': false,
+            }
+            | combine({'analytics_service_url': _apic_a7s_url} if _apic_a7s_url | length > 0 else {})
+          }}
+
+    - name: "Create the Nano Gateway service"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/orgs/admin/availability-zones/availability-zone-default/gateway-services"
+        method: POST
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers_json }}"
+        body_format: json
+        body: "{{ _apic_gtwy_svc_body }}"
+        status_code: [201]
+
+- name: "Existing gateway service notice"
+  ansible.builtin.debug:
+    msg: "Gateway service nano-gateway-service already exists."
+  when: _apic_svc_url | length > 0
