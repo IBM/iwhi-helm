@@ -5,14 +5,12 @@
 # Wave 2 – cert-manager Issuers and Certificates
 #
 # This template creates:
-#   1. selfsigning-issuer – Used by subsystem operators to create their CAs
-#   2. Single issuer hierarchy (if no external issuer provided) – for ALL certificates
-#
-# The selfsigning-issuer is always created for subsystem operators.
-# A single CA (apic-ca) and issuer (apic-issuer) are used for both:
-#   - Public ingress endpoints
-#   - Internal mTLS client certificates
-# This ensures all certificates share the same root CA for trust validation.
+#   1. selfsigning-issuer – Used by subsystem operators (and Valkey, below)
+#      to create their own CAs
+#   2. Leaf certificates for internal mTLS between subsystems, signed by
+#      certificates.issuer (see values.yaml) — the SAME issuer used for the
+#      public ingress endpoints of each CR (see the CR templates for the
+#      ingress annotation side), so a single CA is used everywhere.
 #
 # All resources carry sync-wave "2" so ArgoCD applies them only after the
 # operator group and subscriptions (wave 1) are healthy.
@@ -35,66 +33,13 @@ metadata:
 spec:
   selfSigned: {}
 
-{{- if not .Values.certificates.issuer.name }}
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: ingress-ca
-  namespace: {{ include "apic.namespace" . }}
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
-  labels:
-    app.kubernetes.io/instance: "management"
-    app.kubernetes.io/managed-by: "ibm-apiconnect"
-    app.kubernetes.io/name: "ingress-ca"
-    {{- include "apic.labels" . | nindent 4 }}
-spec:
-  duration: 87600h # 10 years
-  renewBefore: 720h # 30 days
-  privateKey:
-    rotationPolicy: Always
-  secretName: ingress-ca
-  commonName: "ingress-ca"
-  usages:
-  - digital signature
-  - key encipherment
-  - cert sign
-  isCA: true
-  issuerRef:
-    name: selfsigning-issuer
-    kind: Issuer
-  secretTemplate:
-    labels:
-      app.kubernetes.io/instance: "management"
-      app.kubernetes.io/managed-by: "ibm-apiconnect"
-      app.kubernetes.io/name: "ingress-ca"
-
----
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: ingress-issuer
-  namespace: {{ include "apic.namespace" . }}
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
-  labels:
-    app.kubernetes.io/instance: "management"
-    app.kubernetes.io/managed-by: "ibm-apiconnect"
-    app.kubernetes.io/name: "ingress-issuer"
-    {{- include "apic.labels" . | nindent 4 }}
-spec:
-  ca:
-    secretName: ingress-ca
-{{- end }}
-
 {{- if .Values.valkey.enabled }}
 ---
 # =============================================================================
 # Valkey TLS – dedicated CA + Issuer
 #
-# Valkey requires its own CA-backed issuer (distinct from ingress-issuer) so
-# that the leaf certificate's SANs can cover all ValkeyCluster service names.
+# Valkey requires its own CA-backed issuer (distinct from certificates.issuer)
+# so that the leaf certificate's SANs can cover all ValkeyCluster service names.
 # Hierarchy: selfsigning-issuer -> valkey-ca -> valkey-issuer -> valkey-tls
 # =============================================================================
 ---
@@ -202,8 +147,8 @@ spec:
   commonName: portal-admin-client
   secretName: portal-admin-client
   issuerRef:
-    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
-    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+    name: {{ include "apic.issuerName" . }}
+    kind: {{ include "apic.issuerKind" . }}
   usages:
   - "client auth"
   - "signing"
@@ -239,8 +184,8 @@ spec:
   commonName: gateway-client-client
   secretName: gateway-client-client
   issuerRef:
-    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
-    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+    name: {{ include "apic.issuerName" . }}
+    kind: {{ include "apic.issuerKind" . }}
   usages:
   - "client auth"
   - "signing"
@@ -276,8 +221,8 @@ spec:
   commonName: analytics-ingestion-client
   secretName: analytics-ingestion-client
   issuerRef:
-    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
-    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+    name: {{ include "apic.issuerName" . }}
+    kind: {{ include "apic.issuerKind" . }}
   usages:
   - "client auth"
   - "signing"
@@ -313,8 +258,8 @@ spec:
   commonName: gateway-service
   secretName: gateway-service
   issuerRef:
-    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
-    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+    name: {{ include "apic.issuerName" . }}
+    kind: {{ include "apic.issuerKind" . }}
   usages:
   - "client auth"
   - "signing"
@@ -350,8 +295,8 @@ spec:
   commonName: gateway-peering
   secretName: gateway-peering
   issuerRef:
-    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
-    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+    name: {{ include "apic.issuerName" . }}
+    kind: {{ include "apic.issuerKind" . }}
   usages:
   - "server auth"
   - "client auth"
@@ -388,8 +333,8 @@ spec:
   commonName: devportal-admin-client
   secretName: devportal-admin-client
   issuerRef:
-    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
-    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+    name: {{ include "apic.issuerName" . }}
+    kind: {{ include "apic.issuerKind" . }}
   usages:
     - "client auth"
     - "signing"
@@ -424,8 +369,8 @@ spec:
   commonName: devportal-wmapigateway-client
   secretName: devportal-wmapigateway-client
   issuerRef:
-    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
-    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+    name: {{ include "apic.issuerName" . }}
+    kind: {{ include "apic.issuerKind" . }}
   usages:
     - "client auth"
     - "signing"
@@ -460,8 +405,8 @@ spec:
   commonName: wmapigateway-mgmt-client
   secretName: wmapigateway-mgmt-client
   issuerRef:
-    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
-    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+    name: {{ include "apic.issuerName" . }}
+    kind: {{ include "apic.issuerKind" . }}
   usages:
     - "client auth"
     - "signing"
@@ -496,8 +441,8 @@ spec:
   commonName: wmapigateway-devportal-client
   secretName: wmapigateway-devportal-client
   issuerRef:
-    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
-    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+    name: {{ include "apic.issuerName" . }}
+    kind: {{ include "apic.issuerKind" . }}
   usages:
     - "client auth"
     - "signing"
@@ -532,8 +477,8 @@ spec:
   commonName: nano-gateway-mgmt-client
   secretName: nano-gateway-mgmt-client
   issuerRef:
-    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
-    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+    name: {{ include "apic.issuerName" . }}
+    kind: {{ include "apic.issuerKind" . }}
   usages:
     - "client auth"
     - "signing"
@@ -569,8 +514,8 @@ spec:
   commonName: federatedapimanagement-admin-client
   secretName: federatedapimanagement-admin-client
   issuerRef:
-    name: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
-    kind: {{ .Values.certificates.issuer.kind | default "Issuer" }}
+    name: {{ include "apic.issuerName" . }}
+    kind: {{ include "apic.issuerKind" . }}
   usages:
     - "client auth"
     - "signing"

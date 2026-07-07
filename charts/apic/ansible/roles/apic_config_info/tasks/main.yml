@@ -1,9 +1,10 @@
 ---
 # Equivalent of cp4i-demo scripts/87w-apic-config-info.sh, restricted to the
 # subsystems this chart actually deploys (management, analytics, wM API
-# Gateway, Nano Gateway, wM Developer Portal, FAM). Unlike the original
-# script, passwords are never printed: only the secret name and the command
-# to retrieve it are shown.
+# Gateway, wM Developer Portal, FAM). Unlike the original script, passwords
+# are never printed: only the secret name and the command to retrieve it are
+# shown. Nano Gateway has no end-user-facing endpoint worth summarizing here
+# (see the NanoGatewayCluster CR for gateway service endpoints).
 
 - name: "Look up all relevant routes"
   kubernetes.core.k8s_info:
@@ -15,14 +16,8 @@
     - "{{ apic_mgmt_instance }}-admin"
     - "{{ apic_mgmt_instance }}-api-manager"
     - "{{ apic_analytics_instance }}-ai-endpoint"
-    - "{{ apic_wmapigateway_instance }}-mgmt-endpoint"
-    - "{{ apic_wmapigateway_instance }}-gateway-endpoint"
     - "{{ apic_wmapigateway_instance }}-ui-endpoint"
-    - "{{ apic_nanogateway_instance }}-mgmt-endpoint"
-    - "{{ apic_nanogateway_instance }}-nanogw"
-    - "{{ apic_wmdevportal_instance }}-devportal-admin"
     - "{{ apic_wmdevportal_instance }}-devportal-web"
-    - "{{ apic_fam_instance }}-admin-endpoint"
     - "{{ apic_fam_instance }}-ui-endpoint"
   register: _apic_info_routes
   ignore_errors: true
@@ -60,7 +55,7 @@
       Cloud Manager:
         UI URL: https://{{ _apic_routes[apic_mgmt_instance ~ '-admin'] | default('(not available)') }}
         Admin user: admin
-        Admin password: oc get secret {{ apic_mgmt_instance }}-admin-secret -n {{ apic_namespace }} -o jsonpath='{{ '{{' }}.data.password{{ '}}' }}' | base64 -d
+        Admin password: oc get secret {{ apic_mgmt_instance }}-admin-secret -n {{ apic_namespace }} -o jsonpath='{{ '{' }}.data.password{{ '}' }}' | base64 -d
 
       API Manager:
         UI URL: https://{{ _apic_routes[apic_mgmt_instance ~ '-api-manager'] | default('(not available)') }}
@@ -70,7 +65,7 @@
           - {{ uid }}
       {% endfor %}
         Retrieve a user's password with:
-          oc get secret {{ apic_state_secret_name }} -n {{ apic_namespace }} -o jsonpath='{{ '{{' }}.data.porg-lur-users-config\.json{{ '}}' }}' | base64 -d | jq .
+          oc get secret {{ apic_state_secret_name }} -n {{ apic_namespace }} -o jsonpath='{{ '{' }}.data.porg-lur-users-config\.json{{ '}' }}' | base64 -d | jq .
       {% endif %}
 
       Analytics:
@@ -81,41 +76,35 @@
       {% endif %}
 
       wM API Gateway:
-      {% if _apic_routes[apic_wmapigateway_instance ~ '-mgmt-endpoint'] | default('') | length > 0 %}
-        Management endpoint: https://{{ _apic_routes[apic_wmapigateway_instance ~ '-mgmt-endpoint'] }}
-        API endpoint: https://{{ _apic_routes[apic_wmapigateway_instance ~ '-gateway-endpoint'] | default('') }}
-        UI endpoint: https://{{ _apic_routes[apic_wmapigateway_instance ~ '-ui-endpoint'] | default('') }}
+      {% if _apic_routes[apic_wmapigateway_instance ~ '-ui-endpoint'] | default('') | length > 0 %}
+        UI endpoint: https://{{ _apic_routes[apic_wmapigateway_instance ~ '-ui-endpoint'] }}
         Admin user: Administrator
-        Admin password: oc get secret {{ apic_wmapigateway_instance }}-admin-secret -n {{ apic_namespace }} -o jsonpath='{{ '{{' }}.data.password{{ '}}' }}' | base64 -d
-      {% else %}
-        Not available.
-      {% endif %}
-
-      DP Nano Gateway:
-      {% if _apic_routes[apic_nanogateway_instance ~ '-mgmt-endpoint'] | default('') | length > 0 %}
-        Management endpoint: https://{{ _apic_routes[apic_nanogateway_instance ~ '-mgmt-endpoint'] }}
-        API endpoint (wildcard route): https://<subdomain>.{{ (_apic_routes[apic_nanogateway_instance ~ '-nanogw'] | default('')) | regex_replace('^wildcard\.', '') }}
-          Replace <subdomain> with your gateway service's configured subdomain.
+        Admin password: oc get secret {{ apic_wmapigateway_instance }}-admin-secret -n {{ apic_namespace }} -o jsonpath='{{ '{' }}.data.password{{ '}' }}' | base64 -d
       {% else %}
         Not available.
       {% endif %}
 
       wM Developer Portal:
-      {% if _apic_routes[apic_wmdevportal_instance ~ '-devportal-admin'] | default('') | length > 0 %}
-        Management endpoint: https://{{ _apic_routes[apic_wmdevportal_instance ~ '-devportal-admin'] }}
-        Website endpoint: https://{{ _apic_routes[apic_wmdevportal_instance ~ '-devportal-web'] | default('') }}
+      {% if _apic_routes[apic_wmdevportal_instance ~ '-devportal-web'] | default('') | length > 0 %}
+        Website endpoint: https://{{ _apic_routes[apic_wmdevportal_instance ~ '-devportal-web'] }}
         Admin user: Administrator
-        Admin password: oc get secret {{ apic_wmdevportal_instance }}-admin-secret -n {{ apic_namespace }} -o jsonpath='{{ '{{' }}.data.password{{ '}}' }}' | base64 -d
+        Admin password: oc get secret {{ apic_wmdevportal_instance }}-admin-secret -n {{ apic_namespace }} -o jsonpath='{{ '{' }}.data.password{{ '}' }}' | base64 -d
       {% else %}
         Not available.
       {% endif %}
 
       Federated API Management:
-      {% if _apic_routes[apic_fam_instance ~ '-admin-endpoint'] | default('') | length > 0 %}
-        Management endpoint: https://{{ _apic_routes[apic_fam_instance ~ '-admin-endpoint'] }}
-        UI endpoint: https://{{ _apic_routes[apic_fam_instance ~ '-ui-endpoint'] | default('') }}
-        Admin user: administrator
-        Admin password: oc get secret fam-admin-secret -n {{ apic_namespace }} -o jsonpath='{{ '{{' }}.data.password{{ '}}' }}' | base64 -d
+      {% if _apic_routes[apic_fam_instance ~ '-ui-endpoint'] | default('') | length > 0 %}
+        UI endpoint: https://{{ _apic_routes[apic_fam_instance ~ '-ui-endpoint'] }}
+        UI login user: Administrator
+        UI login password: manage
+          (fixed webMethods/UMC default, generated and owned by the
+          fam-ingress-creds secret — not managed by this chart. Change it
+          from the UI after first login if needed.)
+        Control-plane API credential (used internally by Management to
+        drive FAM, not for UI login):
+          Admin user: administrator
+          Admin password: oc get secret fam-admin-secret -n {{ apic_namespace }} -o jsonpath='{{ '{' }}.data.password{{ '}' }}' | base64 -d
       {% else %}
         Not available.
       {% endif %}

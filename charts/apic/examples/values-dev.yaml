@@ -23,7 +23,7 @@ global:
   imageRegistry: cp.icr.io/cp/apic
   stackHost: iwhi-dev.apps.itz-r816vx.infra01-lb.fra02.techzone.ibm.com
   storageClass: ocs-external-storagecluster-ceph-rbd
-  appProductVersion: "12.1.0.1"
+  appProductVersion: "12.1.1.0"
   license:
     accept: true
     use: production
@@ -80,8 +80,4 @@ federatedapimanagement:
   analyticsRef:
     name: analytics
     namespace: iwhi-dev
-
-apigw:
-  enabled: false
-
 

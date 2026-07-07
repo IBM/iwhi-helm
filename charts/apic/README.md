@@ -144,10 +144,12 @@ See [documentation](https://www.ibm.com/docs/en/api-connect/software/12.1.0?topi
 - `global.license.metric` - PROCESSOR_VALUE_UNIT or MONTHLY_API_CALL
 
 **Certificate parameters:**
-Note: at this stage, only local issuers work with this Helm chart.
-- `certificates.issuer.name` - if you want to use your own cert manager issuer, specify its name here (if omitted, a self signed issuer will be used)
-- `certificates.issuer.kind` - kind of issuer (Issuer or ClusterIssuer)
-- `certificates.issuer.caSecretName` - name of the secret containing your custom CA
+`certificates.issuer.*` controls a single issuer used for BOTH the internal mTLS leaf certificates exchanged between subsystems AND the public ingress endpoints of each subsystem CR (Cloud Manager, API Manager, ...). Using the same CA for both is required: if they're signed by different, unrelated CAs, cross-subsystem calls that go through a public endpoint (e.g. Management registering the Analytics service by calling its public `ai.<stackHost>` URL) fail with a TLS trust error.
+- `certificates.issuer.mode` - `operator` (default) or `existing`
+  - `operator`: no issuer annotation is set on any CR for the ingress endpoints — requires API Connect 12.1.1+, since the `ibm-apiconnect` operator then creates and manages its own namespace-scoped `apic-ingress-issuer` automatically once it reconciles at least one CR needing it (wave 3). This chart's internal mTLS leaf certificates (created in wave 2) reference that same `apic-ingress-issuer` as their issuer — a single CA is used everywhere, with no externally pre-created Issuer/ClusterIssuer needed. Since the issuer doesn't exist yet when the wave 2 certificates are created, they show as Pending ("Referenced Issuer not found") until wave 3 runs, then turn Ready automatically within seconds — this is expected and doesn't fail wave 2. This chart never creates a ClusterIssuer, matching a namespace-scoped operator deployment.
+  - `existing`: reference a single Issuer or ClusterIssuer you already created (see `examples/custom-issuer.yaml` / `examples/custom-clusterissuer.yaml`), used both as the `issuerRef` for internal leaf certificates and, via the `apiconnect-operator/default-ingress-issuer` / `apiconnect-operator/default-ingress-cluster-issuer` CR annotation, for the ingress endpoints. This chart never creates the Issuer/ClusterIssuer itself — it must already exist and be Ready before wave 2.
+- `certificates.issuer.kind` - `Issuer` or `ClusterIssuer` (only used when `mode: existing`)
+- `certificates.issuer.name` - name of the existing Issuer/ClusterIssuer (required when `mode: existing`)
 
 **Management subsystem parameters:**
 - `management.enabled` - set to `false` to skip this subsystem
@@ -253,6 +255,8 @@ Exposed routes:
 - `fam.<stackHost>` - Federated API Management UI
 - `api.fam.<stackHost>` - Admin API endpoint
 
+Note: logging into the FAM UI itself (`fam.<stackHost>/controlplane/login`) uses a separate, fixed webMethods/UMC account — `Administrator` / `manage` — generated and owned by the operator in the `fam-ingress-creds` secret. This is unrelated to `federatedapimanagement.adminSecret` (the control-plane API credential Management uses to drive FAM) and is not managed by this chart. Change it from the UI after first login if needed.
+
 ## Deployment
 
 The chart uses a `deployment.wave` parameter to control which components are deployed:
@@ -294,8 +298,7 @@ oc get pod -n $NAMESPACE -l app.kubernetes.io/name=datapower-nano-operator
 
 ### Wave 2 - Deploy Certificates
 
-Note 1: this Helm chart currently does not work with cluster issuers.  
-Note 2: if you're using a local issuer, make sure to have it created in the namespace before starting wave 2.
+Note: if `certificates.issuer.mode: existing` (see `certificates.issuer.*` above), make sure the referenced Issuer/ClusterIssuer already exists and is Ready before starting wave 2.
 
 ```bash
 helm upgrade --install apic-certificates . \
@@ -306,10 +309,12 @@ helm upgrade --install apic-certificates . \
 
 **Wait for certificates to be ready (1-3 minutes):**
 
-Check certificates (All certificates should show READY: True):
-```bash 
+```bash
 oc get certificate -n $NAMESPACE
 ```
+
+- `mode: existing` (or explicit air-gapped/cluster-issuer setups): all certificates should show `READY: True`.
+- `mode: operator` (default): the internal mTLS leaf certificates (`portal-admin-client`, `gateway-service`, etc.) stay `Pending` (`Referenced Issuer not found: apic-ingress-issuer`) — this is expected, since that issuer is only created once the `ibm-apiconnect` operator reconciles a wave 3 CR. They turn `Ready` automatically within seconds of that.
 
 ### Wave 3 - Deploy Subsystems
 

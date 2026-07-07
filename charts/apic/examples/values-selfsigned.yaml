@@ -3,10 +3,10 @@
 # Valid values: "1" (operators), "2" (certificates), "3" (subsystems), "4" (post-config, optional), "all" (ArgoCD)
 #
 # Example commands:
-#   helm install apic-operators . -f values-localissuer.yaml --set deployment.wave=1 -n apic
-#   helm install apic-certificates . -f values-localissuer.yaml --set deployment.wave=2 -n apic
-#   helm install apic-subsystems . -f values-localissuer.yaml --set deployment.wave=3 -n apic
-#   helm install apic-postconfig . -f values-localissuer.yaml --set deployment.wave=4 -n apic
+#   helm install apic-operators . -f values-selfsigned.yaml --set deployment.wave=1 -n apic
+#   helm install apic-certificates . -f values-selfsigned.yaml --set deployment.wave=2 -n apic
+#   helm install apic-subsystems . -f values-selfsigned.yaml --set deployment.wave=3 -n apic
+#   helm install apic-postconfig . -f values-selfsigned.yaml --set deployment.wave=4 -n apic
 #
 # deployment:
 #   wave: ""  # Set via --set deployment.wave=X on command line
@@ -21,7 +21,6 @@ global:
   namespace: apic
   imagePullSecret: ibm-entitlement-key
   imageRegistry: cp.icr.io/cp/apic
-  # Prefiexing the stackHost with the namespace to avoid conflicts with the clusterissuer deployment which shares the same host value but is deployed in a different namespace.
   stackHost: apic.apps.itz-l9qxlg.infra01-lb.lon04.techzone.ibm.com # Replace with your cluster's host
   storageClass: ocs-external-storagecluster-ceph-rbd
   appProductVersion: "12.1.1.0"
@@ -33,10 +32,14 @@ global:
 
 certificates:
   enabled: true
+  # mode: operator (chart default) - both the internal mTLS leaf certificates
+  # AND the public ingress endpoints are signed by "apic-ingress-issuer",
+  # auto-created and managed by the ibm-apiconnect operator itself. No
+  # external Issuer/ClusterIssuer to pre-create, and a single shared CA
+  # everywhere. Included here explicitly for clarity, even though it's the
+  # chart default.
   issuer:
-    mode: existing
-    name: "custom-issuer"
-    kind: Issuer
+    mode: operator
 
 management:
   enabled: true
@@ -112,5 +115,3 @@ postConfig:
       email: "porgadmin@apic.com"
       firstName: "porg"
       lastName: "admin"
-
-

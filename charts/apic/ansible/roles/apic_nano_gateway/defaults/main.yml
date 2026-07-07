@@ -1,5 +1,7 @@
 ---
 # Issuer used for the nano-gateway-app certificate (cert-manager). Matches
-# the apic Helm chart's ingress issuer name when certificates.issuer.name is
-# left empty (self-signed default: "ingress-issuer").
-apic_nanogateway_cert_issuer: ingress-issuer
+# the apic Helm chart's certificates.issuer default ("apic-ingress-issuer",
+# managed by the ibm-apiconnect operator). Always overridden via extra-vars
+# by postconfig-job.yaml.
+apic_nanogateway_cert_issuer: apic-ingress-issuer
+apic_nanogateway_cert_issuer_kind: Issuer

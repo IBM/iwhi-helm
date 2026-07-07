@@ -53,7 +53,7 @@ Next steps:
 
 Components:
 {{- if .Values.certificates.enabled }}
-  - Certificate Issuer: {{ .Values.certificates.issuer.name | default "ingress-issuer" }} ({{ .Values.certificates.issuer.kind | default "Issuer" }})
+  - Certificate Issuer: {{ include "apic.issuerName" . }} ({{ include "apic.issuerKind" . }})
 {{- end }}
 {{- if .Values.valkey.enabled }}
   - Valkey CA/Issuer: valkey-issuer
@@ -61,8 +61,18 @@ Components:
 {{- end }}
 
 Next steps:
+{{- if eq .Values.certificates.issuer.mode "existing" }}
   1. Verify all certificates show READY: True:
      oc get certificate -n {{ include "apic.namespace" . }}
+{{- else }}
+  1. Verify all certificates show READY: True, EXCEPT the internal mTLS leaf
+     certificates (portal-admin-client, gateway-service, etc.), which stay
+     Pending ("Referenced Issuer not found: apic-ingress-issuer") until wave 3
+     — this is expected in mode: operator, since that issuer is only created
+     once the ibm-apiconnect operator reconciles a wave 3 CR. They turn Ready
+     automatically within seconds of that:
+     oc get certificate -n {{ include "apic.namespace" . }}
+{{- end }}
 
   2. Deploy Wave 3 (Subsystems):
      helm install apic-subsystems . -f <your-values-file> --set deployment.wave=3 -n {{ include "apic.namespace" . }}

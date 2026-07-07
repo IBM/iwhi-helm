@@ -67,34 +67,29 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
 {{- end }}
 
 {{/*
-Resolve the certificate issuer name.
-Returns the provided name if set, otherwise returns the default created issuer name.
+Resolve the certificate issuer name used for internal mTLS leaf certificates.
+Returns certificates.issuer.name in "existing" mode, otherwise
+"apic-ingress-issuer" (the issuer the ibm-apiconnect operator auto-manages,
+in "operator" mode).
 Usage: {{ include "apic.issuerName" . }}
 */}}
 {{- define "apic.issuerName" -}}
-{{- if .Values.certificates.issuer.name -}}
+{{- if eq .Values.certificates.issuer.mode "existing" -}}
 {{- .Values.certificates.issuer.name -}}
 {{- else -}}
-apic-issuer
+apic-ingress-issuer
 {{- end -}}
 {{- end }}
 
 {{/*
-Resolve the certificate issuer kind.
+Resolve the certificate issuer kind used for internal mTLS leaf certificates.
 Usage: {{ include "apic.issuerKind" . }}
 */}}
 {{- define "apic.issuerKind" -}}
+{{- if eq .Values.certificates.issuer.mode "existing" -}}
 {{- .Values.certificates.issuer.kind -}}
-{{- end }}
-
-{{/*
-Determine if issuer should be created.
-Returns true if name is empty (meaning we need to create it).
-Usage: {{ include "apic.createIssuer" . }}
-*/}}
-{{- define "apic.createIssuer" -}}
-{{- if not .Values.certificates.issuer.name -}}
-true
+{{- else -}}
+Issuer
 {{- end -}}
 {{- end }}
 
@@ -108,6 +103,22 @@ Usage: {{ include "apic.issuerAnnotation" . }}
 cert-manager.io/cluster-issuer
 {{- else -}}
 cert-manager.io/issuer
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the CR-level annotation for the ingress issuer, per
+certificates.issuer (see values.yaml). Returns an empty string in "operator"
+mode (no annotation — the operator auto-manages its own issuer).
+Usage: {{ include "apic.ingressIssuerAnnotation" . }}
+*/}}
+{{- define "apic.ingressIssuerAnnotation" -}}
+{{- if eq .Values.certificates.issuer.mode "existing" -}}
+{{- if eq .Values.certificates.issuer.kind "ClusterIssuer" -}}
+apiconnect-operator/default-ingress-cluster-issuer: {{ .Values.certificates.issuer.name }}
+{{- else -}}
+apiconnect-operator/default-ingress-issuer: {{ .Values.certificates.issuer.name }}
+{{- end -}}
 {{- end -}}
 {{- end }}
 

@@ -87,6 +87,7 @@ spec:
               "apic_porg_user_fname" .Values.postConfig.providerOrg.admin.firstName
               "apic_porg_user_lname" .Values.postConfig.providerOrg.admin.lastName
               "apic_nanogateway_cert_issuer" (include "apic.issuerName" .)
+              "apic_nanogateway_cert_issuer_kind" (include "apic.issuerKind" .)
               "apic_mailserver_name" .Values.postConfig.mailServer.name
               "apic_mailserver_title" .Values.postConfig.mailServer.title
               "apic_mail_host" .Values.postConfig.mailServer.host

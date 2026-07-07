@@ -10,28 +10,26 @@ metadata:
   namespace: {{ include "apic.namespace" . }}
   annotations:
     argocd.argoproj.io/sync-wave: "3"
+    {{- include "apic.ingressIssuerAnnotation" . | nindent 4 }}
   labels:
     app.kubernetes.io/name: ibm-apiconnect
     {{- include "apic.labels" . | nindent 4 }}
 spec:
+  # No secretName or cert-manager.io/issuer annotation is set on any host
+  # below: per the "Default issuers and automatic certificate management"
+  # docs (API Connect 12.1.1+), leaving both unset lets the operator
+  # auto-configure the endpoint — either against its own auto-created
+  # "apic-ingress-issuer" (mode: operator) or against the issuer referenced by
+  # the CR-level annotation above (mode: existing).
   gatewayEndpoint:
-    annotations:
-      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
     hosts:
     - name: wmapigateway-gw.{{ .Values.global.stackHost }}
-      secretName: wmapigateway-gw-tls-secret
   uiEndpoint:
-    annotations:
-      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
     hosts:
     - name: wmapigateway-ui.{{ .Values.global.stackHost }}
-      secretName: wmapigateway-ui-tls-secret
   mgmtEndpoint:
-    annotations:
-      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
     hosts:
     - name: wmapigateway-mgmt.{{ .Values.global.stackHost }}
-      secretName: wmapigateway-mgmt-tls-secret
   mgmtClientSubjectDN: |
     CN=wmapigateway-mgmt-client,O=cert-manager
     CN=devportal-wmapigateway-client,O=cert-manager

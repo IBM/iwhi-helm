@@ -84,27 +84,57 @@ subscriptions:
 certificates:
   enabled: true
 
-  # Certificate issuer used for ALL certificates (ingress endpoints AND internal mTLS)
-  # If name is empty (""), a self-signed CA and namespace-scoped Issuer will be created
-  # If name is provided, it must reference an existing Issuer or ClusterIssuer
+  # Single issuer used for BOTH:
+  #   - the internal mTLS leaf certificates exchanged between subsystems
+  #     (gateway-service, gateway-peering, devportal-*-client, etc.)
+  #   - the public ingress endpoints of each subsystem CR (cloudManagerEndpoint,
+  #     apiManagerEndpoint, etc.), via the CR-level
+  #     "apiconnect-operator/default-ingress-issuer" /
+  #     "apiconnect-operator/default-ingress-cluster-issuer" annotation
+  #     (see "Default issuers and automatic certificate management",
+  #     API Connect 12.1.1+ docs)
   #
-  # Important: IBM API Connect requires all certificates to be signed by the same CA
-  # for proper trust validation between subsystems.
+  # Important: using the SAME CA for both is required. If the ingress
+  # endpoints and the internal leaf certificates are signed by different,
+  # unrelated CAs, cross-subsystem calls that go through a public endpoint
+  # (e.g. Management registering the Analytics service by calling its public
+  # ai.<stackHost> URL) fail with a TLS trust error, because the caller does
+  # not have the other CA in its trust store.
   #
-  # Examples:
-  #   Self-signed (default):
-  #     name: ""
-  #     kind: Issuer
+  # Two modes:
   #
-  #   External enterprise CA:
-  #     name: "enterprise-issuer"
-  #     kind: Issuer  (or ClusterIssuer)
-  #     caSecretName: "enterprise-ca"
+  #   mode: operator (default) - No secretName and no cert-manager.io/issuer
+  #     or cert-manager.io/cluster-issuer annotation is set on any ingress
+  #     endpoint (both conditions are required per the docs for the operator
+  #     to auto-manage the endpoint), and no CR-level annotation is set
+  #     either. The ibm-apiconnect operator then creates and manages its own
+  #     namespace-scoped "apic-ingress-issuer" once it reconciles at least
+  #     one CR with an endpoint needing it (wave 3). This chart's internal
+  #     mTLS leaf certificates (gateway-service, gateway-peering,
+  #     devportal-*-client, etc., created in wave 2) reference that SAME
+  #     "apic-ingress-issuer" as their issuerRef — a single CA is used
+  #     everywhere, with no externally pre-created Issuer/ClusterIssuer
+  #     needed. This chart never creates a ClusterIssuer, matching a
+  #     namespace-scoped operator deployment.
+  #
+  #     Caveat: since "apic-ingress-issuer" doesn't exist yet when the wave 2
+  #     leaf certificates are created, cert-manager reports them as Pending
+  #     ("Referenced Issuer not found") until wave 3 runs and the operator
+  #     creates the issuer — at which point cert-manager retries
+  #     automatically (no deadline) and they turn Ready within seconds. This
+  #     is expected and does not fail wave 2 itself.
+  #
+  #   mode: existing - Reference a single Issuer or ClusterIssuer you (or
+  #     another tool) already created, used for both the internal leaf
+  #     certificates (issuerRef) and the CR-level ingress annotation. This
+  #     chart never creates the Issuer/ClusterIssuer itself — see
+  #     examples/custom-issuer.yaml / examples/custom-clusterissuer.yaml for
+  #     samples you can apply separately before installing this chart. It
+  #     must already exist and be Ready before wave 2.
   issuer:
-    name: ""
-    kind: Issuer
-    # defaults to "ingress-ca" for self-signed
-    caSecretName: ""
+    mode: operator # operator | existing
+    kind: Issuer   # Issuer | ClusterIssuer (only used when mode: existing)
+    name: ""       # required when mode: existing
 
 # -----------------------------------------------------------------------------
 # Management subsystem (wave 3)
@@ -131,7 +161,6 @@ analytics:
   storageClass: ""   # leave empty to inherit global.storageClass
   storageType: shared
   dataVolumeSize: 100Gi
-  platformCASecret: ""  # leave empty to use certificates.caSecretName
   # Enable additional analytics modes
   federatedAPIManagementMode: true
   devPortalMode: true

@@ -95,8 +95,6 @@ postconfig-build:
 
 # oc/kubectl `create token` both work for the ServiceAccount login below.
 postconfig-push:
-	$(OC) create token default -n $(NAMESPACE) --duration=1h \
-		| $(PODMAN) login --username serviceaccount --password-stdin $(REGISTRY_HOST)
 	$(PODMAN) push $(POSTCONFIG_IMAGE)
 
 # --- Wave 4 Job lifecycle -----------------------------------------------

@@ -11,6 +11,7 @@ metadata:
   namespace: {{ include "apic.namespace" . }}
   annotations:
     argocd.argoproj.io/sync-wave: "3"
+    {{- include "apic.ingressIssuerAnnotation" . | nindent 4 }}
   labels:
     {{- include "apic.labels" . | nindent 4 }}
 spec:
@@ -40,36 +41,27 @@ spec:
   federatedAPIManagement:
     admin:
       secretName: federatedapimanagement-admin-client
+  # No secretName or cert-manager.io/issuer annotation is set on any host
+  # below: per the "Default issuers and automatic certificate management"
+  # docs (API Connect 12.1.1+), leaving both unset lets the operator
+  # auto-configure the endpoint — either against its own auto-created
+  # "apic-ingress-issuer" (mode: operator) or against the issuer referenced by
+  # the CR-level annotation above (mode: existing).
   cloudManagerEndpoint:
-    annotations:
-      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
     hosts:
     - name: admin.{{ .Values.global.stackHost }}
-      secretName: cm-endpoint
   apiManagerEndpoint:
-    annotations:
-      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
     hosts:
     - name: manager.{{ .Values.global.stackHost }}
-      secretName: apim-endpoint
   consumerCatalogEndpoint:
-    annotations:
-      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
     hosts:
     - name: consumer-catalog.{{ .Values.global.stackHost }}
-      secretName: consumer-catalog-endpoint
   platformAPIEndpoint:
-    annotations:
-      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
     hosts:
     - name: api.{{ .Values.global.stackHost }}
-      secretName: api-endpoint
   consumerAPIEndpoint:
-    annotations:
-      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
     hosts:
     - name: consumer.{{ .Values.global.stackHost }}
-      secretName: consumer-endpoint
   databaseVolumeClaimTemplate:
     storageClassName: {{ include "apic.storageClass" (dict "subsystem" .Values.management "global" .Values.global) }}
   microServiceSecurity: certManager

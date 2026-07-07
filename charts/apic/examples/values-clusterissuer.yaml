@@ -35,8 +35,8 @@ certificates:
   enabled: true
   issuer:
     mode: existing
-    name: "custom-issuer"
-    kind: Issuer
+    name: "custom-cluster-issuer"
+    kind: ClusterIssuer
 
 management:
   enabled: true

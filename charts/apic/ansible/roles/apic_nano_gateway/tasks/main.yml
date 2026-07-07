@@ -59,6 +59,7 @@
           - "{{ _apic_nanogw_dns }}"
         issuerRef:
           name: "{{ apic_nanogateway_cert_issuer }}"
+          kind: "{{ apic_nanogateway_cert_issuer_kind | default('Issuer') }}"
   when: _apic_nanogw_tls_secret.resources | length == 0
 
 - name: "Wait for the nano-gateway-app-tls secret to be created"
@@ -67,10 +68,15 @@
     kind: Secret
     name: nano-gateway-app-tls
     namespace: "{{ apic_namespace }}"
-  register: _apic_nanogw_tls_secret
-  until: _apic_nanogw_tls_secret.resources | length > 0
+  register: _apic_nanogw_tls_secret_created
+  until: _apic_nanogw_tls_secret_created.resources | length > 0
   retries: 30
   delay: 5
+  when: _apic_nanogw_tls_secret.resources | length == 0
+
+- name: "Resolve final nano-gateway-app-tls secret fact"
+  ansible.builtin.set_fact:
+    _apic_nanogw_tls_secret: "{{ _apic_nanogw_tls_secret_created }}"
   when: _apic_nanogw_tls_secret.resources | length == 0
 
 - name: "Log in as admin"

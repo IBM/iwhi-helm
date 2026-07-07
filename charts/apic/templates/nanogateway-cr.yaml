@@ -10,6 +10,7 @@ metadata:
   namespace: {{ include "apic.namespace" . }}
   annotations:
     argocd.argoproj.io/sync-wave: "3"
+    {{- include "apic.ingressIssuerAnnotation" . | nindent 4 }}
   labels:
     {{- include "apic.labels" . | nindent 4 }}
 spec:
@@ -23,12 +24,15 @@ spec:
     name: "selfsigning-issuer"
     kind: "Issuer"
   mgmtClientSubjectDN: CN=nano-gateway-mgmt-client,O=cert-manager
+  # No secretName or cert-manager.io/issuer annotation is set below: per the
+  # "Default issuers and automatic certificate management" docs (API Connect
+  # 12.1.1+), leaving both unset lets the operator auto-configure the
+  # endpoint — either against its own auto-created "apic-ingress-issuer"
+  # (mode: operator) or against the issuer referenced by the CR-level annotation
+  # above (mode: existing).
   mgmtEndpoint:
-    annotations:
-      {{ if eq (.Values.certificates.issuer.kind | default "Issuer") "ClusterIssuer" }}cert-manager.io/cluster-issuer{{ else }}cert-manager.io/issuer{{ end }}: {{ .Values.certificates.issuer.name | default "ingress-issuer" }}
     hosts:
     - name: apic-gateway-proxy.{{ .Values.global.stackHost }}
-      secretName: gateway-proxy-endpoint
   redis:
     hosts:
     - {{ include "apic.nanogatewayRedisHost" . }}
