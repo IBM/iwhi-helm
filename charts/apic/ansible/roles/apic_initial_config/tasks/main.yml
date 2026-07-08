@@ -18,29 +18,6 @@
       (see values.yaml) — there is no default mail server.
     quiet: true
 
-# Only checked when the mail host points at the in-cluster MailPit instance
-# this chart documents as a prerequisite; skipped for any other SMTP server.
-- name: "Verify MailPit is deployed"
-  kubernetes.core.k8s_info:
-    api_version: apps/v1
-    kind: Deployment
-    name: mailpit
-    namespace: mailpit
-  register: _mailpit_deployment
-  failed_when: _mailpit_deployment.resources | length == 0
-  when: "'mailpit' in apic_mail_host"
-
-- name: "Fail if MailPit is not ready"
-  ansible.builtin.fail:
-    msg: "MailPit deployment in namespace mailpit is not ready."
-  when:
-    - "'mailpit' in apic_mail_host"
-    - >
-      _mailpit_deployment.resources[0].status.conditions
-      | selectattr('type', 'equalto', 'Available')
-      | map(attribute='status')
-      | first != 'True'
-
 - name: "Log in as admin"
   ansible.builtin.include_role:
     name: apic_common

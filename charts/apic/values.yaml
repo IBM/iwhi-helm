@@ -325,9 +325,10 @@ federatedapimanagement:
 # shipped in ansible/ (packaged into a ConfigMap, see
 # templates/postconfig-configmaps.yaml).
 #
-# Requires the mailpit namespace/deployment to already exist, and each
-# targeted subsystem (nanogateway, wmapigateway, devportal, ...) to be
-# enabled and Ready before this wave runs.
+# Requires an SMTP server reachable from the cluster (see postConfig.mailServer
+# below — any server works, not just MailPit), and each targeted subsystem
+# (nanogateway, wmapigateway, devportal, ...) to be enabled and Ready before
+# this wave runs.
 #
 # The image is NOT built by this chart: build ansible/Dockerfile yourself and
 # push it to your (mirrored, if air-gapped) registry first — see
@@ -339,10 +340,6 @@ postConfig:
   # requires auth (e.g. cp.icr.io). Leave empty for an image pushed to this
   # namespace's internal OpenShift ImageStream.
   imagePullSecret: ""
-  # Namespace where MailPit is deployed (see README "Prerequisites"). The
-  # apic_initial_config role checks it's Ready before connecting Cloud
-  # Manager to it; this chart grants apic-postconfig read access there.
-  mailpitNamespace: mailpit
   backoffLimit: 2
   resources:
     limits:
