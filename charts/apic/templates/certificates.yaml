@@ -115,6 +115,24 @@ spec:
   - {{ $svc }}-leader.{{ $ns }}.svc.cluster.local
   - {{ $svc }}-leader.{{ $ns }}.svc
   - {{ $svc }}-leader
+  - {{ $svc }}-follower-headless.{{ $ns }}.svc.cluster.local
+  - {{ $svc }}-follower-headless.{{ $ns }}.svc
+  - {{ $svc }}-follower-headless
+  - {{ $svc }}-follower.{{ $ns }}.svc.cluster.local
+  - {{ $svc }}-follower.{{ $ns }}.svc
+  - {{ $svc }}-follower
+  {{- /*
+  Per-pod SANs are required because Valkey Cluster clients follow MOVED/CLUSTER
+  SLOTS redirects to each pod's stable headless-service hostname; with
+  tls-cluster enabled, a certificate covering only the generic service names
+  fails peer verification against those per-pod hostnames.
+  */}}
+  {{- range $i := until (int .Values.valkey.leaderReplicas) }}
+  - {{ $svc }}-leader-{{ $i }}.{{ $svc }}-leader-headless.{{ $ns }}.svc.cluster.local
+  {{- end }}
+  {{- range $i := until (int .Values.valkey.followerReplicas) }}
+  - {{ $svc }}-follower-{{ $i }}.{{ $svc }}-follower-headless.{{ $ns }}.svc.cluster.local
+  {{- end }}
   issuerRef:
     name: valkey-issuer
     kind: Issuer
