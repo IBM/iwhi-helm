@@ -3,3 +3,7 @@
 .DS_Store
 *.tgz
 release-files
+*.p12
+*.crt
+*.key
+*.pem
