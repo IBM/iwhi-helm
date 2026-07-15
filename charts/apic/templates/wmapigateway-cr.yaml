@@ -55,6 +55,13 @@ spec:
     license: {{ .Values.global.license.id | quote }}
     metric: {{ .Values.global.license.metric }}
     use: {{ .Values.global.license.use }}
+  {{- if .Values.wmapigateway.customImage }}
+  template:
+  - name: apigateway
+    containers:
+    - name: apigateway
+      image: {{ .Values.wmapigateway.customImage }}
+  {{- end }}
 {{- end }}
 
 

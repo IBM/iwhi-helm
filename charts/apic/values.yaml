@@ -198,6 +198,11 @@ wmapigateway:
   adminSecret:
     name: wmapigateway-admin-secret
     key: password
+  # Custom apigateway container image (optional). Use this to point at an
+  # image built from wmapigateway/Dockerfile (e.g. with extra JMS jars or
+  # custom packages) instead of the operator's default image. Leave empty to
+  # use the default. See wmapigateway/README.md for build instructions.
+  customImage: ""   # e.g. image-registry.openshift-image-registry.svc:5000/apic/apic-wmapigateway:custom
 
 # -----------------------------------------------------------------------------
 # Valkey key-value store (waves 1/2/3) – required by the Nano Gateway subsystem
