@@ -115,7 +115,7 @@ oc apply -f catalog-sources/12.1.1.0/catalog-sources-apiconnect.yaml
 
 ### Apply the cluster-scoped CRDs (only if the Nano Gateway subsystem will be installed)
 
-Not needed unless the feature team plans to deploy the Nano Gateway subsystem — check with them first. Installs the Nano Gateway CRDs, and the Valkey CRDs (unless the feature team runs Valkey outside this chart) — cluster-scoped, outside Helm (`oc apply`, not `helm install`).
+Installs the Nano Gateway CRDs, and the Valkey CRDs (unless the feature team runs Valkey outside this chart) — cluster-scoped, outside Helm (`oc apply`, not `helm install`).
 
 ```bash
 oc apply -f cluster/crds/nanogateway-crds.yaml
@@ -136,7 +136,7 @@ Wave 1 checks that the Gateway API (`gateway.networking.k8s.io/v1`) is available
 
 ### Apply the cluster-scoped RBAC (only if the Nano Gateway subsystem will be installed)
 
-Not needed unless the feature team plans to deploy the Nano Gateway subsystem — check with them first. Grants the Nano Gateway and Valkey operator ServiceAccounts (created later, namespace-scoped, in wave 1) the ClusterRole they need — outside Helm (`oc apply`, not `helm install`). The feature team never needs to run this, and its own namespace-scoped RBAC (see wave 1 below) does not grant these permissions.
+Grants the Nano Gateway and Valkey operator ServiceAccounts (created later, namespace-scoped, in wave 1) the ClusterRole they need — outside Helm (`oc apply`, not `helm install`). The feature team never needs to run this, and its own namespace-scoped RBAC (see wave 1 below) does not grant these permissions.
 
 ```bash
 envsubst '$NAMESPACE' < cluster/rbac/nanogateway-operator.yaml | oc apply -f -
@@ -149,6 +149,16 @@ make wave0 NAMESPACE=$NAMESPACE
 ```
 
 If you deploy multiple `datapower-nano-operator` instances across several namespaces (one per feature team), the `ClusterRoleBinding` in `cluster/rbac/nanogateway-operator.yaml` needs one subject per namespace — add them manually before re-applying; `envsubst` only substitutes a single `$NAMESPACE` and will overwrite, not merge, the existing subjects list.
+
+### Allow wildcard routes (only if the Nano Gateway subsystem will be installed)
+
+OpenShift rejects wildcard routes by default; the Nano Gateway's wildcard route (`nanogw.<stackHost>`, used as the base for all API routes) stays `Rejected` without this. One-time, cluster-admin-level change to the cluster's default `IngressController`:
+
+```bash
+oc patch ingresscontroller default -n openshift-ingress-operator --type=merge -p '{"spec":{"routeAdmission":{"wildcardPolicy":"WildcardsAllowed"}}}'
+```
+
+If this change isn't made (or isn't possible on a shared cluster), the Nano Gateway subsystem still works, but the feature team must instead create an explicit, namespace-scoped Route for every API or API product exposed through the Nano Gateway, one by one, rather than relying on the single wildcard route to cover all of them.
 
 ## Feature-team-level Prerequisites
 
