@@ -29,7 +29,7 @@ REGISTRY_HOST  ?= $(shell $(OC) get route default-route -n openshift-image-regis
 POSTCONFIG_IMAGE ?= $(REGISTRY_HOST)/$(NAMESPACE)/apic-postconfig:$(POSTCONFIG_TAG)
 
 .PHONY: help lint template \
-	wave1 wave2 wave3 wave4 wave-all \
+	wave0 wave1 wave2 wave3 wave4 wave-all \
 	postconfig-imagestream postconfig-build postconfig-push postconfig-image \
 	postconfig-logs postconfig-status postconfig-rerun \
 	uninstall clean
@@ -37,8 +37,9 @@ POSTCONFIG_IMAGE ?= $(REGISTRY_HOST)/$(NAMESPACE)/apic-postconfig:$(POSTCONFIG_T
 help:
 	@echo "Targets:"
 	@echo "  lint                    - helm lint the apic chart"
-	@echo "  template WAVE=<1|2|3|4|all> - render the chart for a given wave (no cluster changes)"
-	@echo "  wave1                   - deploy operators (wave 1)"
+	@echo "  template WAVE=<0|1|2|3|4|all> - render the chart for a given wave (no cluster changes)"
+	@echo "  wave0                   - platform team: cluster-scoped CRDs + ClusterRole/ClusterRoleBinding (oc apply, no Helm)"
+	@echo "  wave1                   - feature team: deploy operators (wave 1, namespace-scoped)"
 	@echo "  wave2                   - deploy certificates (wave 2)"
 	@echo "  wave3                   - deploy subsystems (wave 3)"
 	@echo "  wave4                   - deploy post-configuration (wave 4, requires postconfig-image)"
@@ -62,6 +63,17 @@ lint:
 
 template:
 	helm template test $(CHART_DIR) -f $(VALUES_FILE) --set deployment.wave=$(WAVE) $(EXTRA_ARGS)
+
+# Wave 0 — platform team only. Cluster-scoped objects (CRDs, ClusterRole,
+# ClusterRoleBinding), applied directly with oc/kubectl, outside Helm.
+# Requires cluster-admin-level privileges; the feature team never runs this.
+# Safe to re-run (oc apply is idempotent); CRD updates on chart upgrades also
+# go through this target — re-run it whenever cluster/crds/*.yaml changes.
+wave0:
+	$(OC) apply -f $(CHART_DIR)/cluster/crds/nanogateway-crds.yaml
+	$(OC) apply -f $(CHART_DIR)/cluster/crds/valkey-crds.yaml
+	NAMESPACE=$(NAMESPACE) envsubst '$$NAMESPACE' < $(CHART_DIR)/cluster/rbac/nanogateway-operator.yaml | $(OC) apply -f -
+	NAMESPACE=$(NAMESPACE) envsubst '$$NAMESPACE' < $(CHART_DIR)/cluster/rbac/valkey-operator.yaml | $(OC) apply -f -
 
 wave1:
 	helm upgrade --install apic-operators $(CHART_DIR) \

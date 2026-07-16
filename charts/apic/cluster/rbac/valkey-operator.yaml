@@ -1,0 +1,134 @@
+# =============================================================================
+# Wave 0 – Valkey Operator cluster-scoped RBAC
+# Applied via `oc apply` (envsubst for $NAMESPACE), not by Helm.
+# Requires cluster-admin-level privileges (ClusterRole/ClusterRoleBinding
+# creation) — this is the platform team's responsibility, not the feature
+# team's. The valkey-operator ServiceAccount itself, and the Deployment that
+# uses this binding, are created in wave 1 (templates/valkey-operator.yaml),
+# namespace-scoped, by the feature team.
+# =============================================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: valkey-operator
+  labels:
+    app.kubernetes.io/managed-by: kubectl
+    app.kubernetes.io/part-of: ibm-apiconnect
+rules:
+- apiGroups:
+  - valkey.datapower.ibm.com
+  resources:
+  - valkeys
+  - valkeyclusters
+  - valkeyreplications
+  - valkey
+  - valkeycluster
+  - valkeysentinel
+  - valkeysentinels
+  - valkeyreplication
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- nonResourceURLs:
+  - '*'
+  verbs:
+  - get
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - valkey.datapower.ibm.com
+  resources:
+  - valkey/status
+  - valkeycluster/status
+  - valkeyclusters/status
+  - valkeysentinel/status
+  - valkeysentinels/status
+  - valkeyreplication/status
+  - valkeyreplications/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  - pods/exec
+  - pods
+  - services
+  - configmaps
+  - events
+  - persistentvolumeclaims
+  - namespace
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: valkey-operator
+  labels:
+    app.kubernetes.io/managed-by: kubectl
+    app.kubernetes.io/part-of: ibm-apiconnect
+subjects:
+- kind: ServiceAccount
+  name: valkey-operator
+  namespace: $NAMESPACE
+roleRef:
+  kind: ClusterRole
+  name: valkey-operator
+  apiGroup: rbac.authorization.k8s.io

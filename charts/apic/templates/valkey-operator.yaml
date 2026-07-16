@@ -1,8 +1,12 @@
 {{- $wave := .Values.deployment.wave | toString }}
 {{- if and .Values.valkey.enabled (or (eq $wave "1") (eq $wave "all")) }}
 # =============================================================================
-# Wave 1 – Valkey Operator (RBAC + Deployment)
+# Wave 1 – Valkey Operator (ServiceAccount + Deployment)
 # Required by the Nano Gateway subsystem's key-value store.
+# Namespace-scoped only — the cluster-scoped CRDs (cluster/crds/) and the
+# ClusterRole/ClusterRoleBinding this ServiceAccount is bound to
+# (cluster/rbac/valkey-operator.yaml) are wave 0, applied separately by the
+# platform team via `oc apply` before this wave runs.
 # =============================================================================
 
 ---
@@ -16,135 +20,6 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"
   labels:
     {{- include "apic.labels" . | nindent 4 }}
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: valkey-operator
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
-  labels:
-    {{- include "apic.labels" . | nindent 4 }}
-rules:
-- apiGroups:
-  - valkey.datapower.ibm.com
-  resources:
-  - valkeys
-  - valkeyclusters
-  - valkeyreplications
-  - valkey
-  - valkeycluster
-  - valkeysentinel
-  - valkeysentinels
-  - valkeyreplication
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- nonResourceURLs:
-  - '*'
-  verbs:
-  - get
-- apiGroups:
-  - apiextensions.k8s.io
-  resources:
-  - customresourcedefinitions
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - valkey.datapower.ibm.com
-  resources:
-  - valkey/status
-  - valkeycluster/status
-  - valkeyclusters/status
-  - valkeysentinel/status
-  - valkeysentinels/status
-  - valkeyreplication/status
-  - valkeyreplications/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  - pods/exec
-  - pods
-  - services
-  - configmaps
-  - events
-  - persistentvolumeclaims
-  - namespace
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - apps
-  resources:
-  - statefulsets
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - coordination.k8s.io
-  resources:
-  - leases
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - policy
-  resources:
-  - poddisruptionbudgets
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: valkey-operator
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
-  labels:
-    {{- include "apic.labels" . | nindent 4 }}
-subjects:
-- kind: ServiceAccount
-  name: valkey-operator
-  namespace: {{ include "apic.namespace" . }}
-roleRef:
-  kind: ClusterRole
-  name: valkey-operator
-  apiGroup: rbac.authorization.k8s.io
 
 ---
 apiVersion: apps/v1

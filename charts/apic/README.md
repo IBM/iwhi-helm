@@ -7,11 +7,55 @@ Notes:
 - The DataPower API Gateway is not yet handled by this chart — only the webMethods API Gateway and the DataPower Nano Gateway are supported.
 - The CMS-based Developer Portal (Drupal) is not yet handled — only the webMethods Developer Portal is supported.
 
-## Prerequisites
+## Infrastructure Requirements
 
-Ensure you've set the following environment variable, which is used in what follows:
+### Compute (CPU / memory)
+
+Each subsystem is sized independently via its own `<subsystem>.profile` value (see `values.yaml`), following IBM's own profile naming (e.g. `n1xc2.m16`). The actual CPU/memory reserved per profile is defined by IBM, not by this chart, and depends on the API Connect / Nano Gateway version — always check the official tables before sizing a cluster:
+- API Connect subsystems (Management, Analytics, Developer Portal, webMethods API Gateway, Federated API Management): [Deployment profiles](https://www.ibm.com/docs/en/api-connect/software/12.1.0?topic=profiles-api-connect-deployment-openshift)
+- Nano Gateway: [Deployment profile limits](https://www.ibm.com/docs/en/api-connect/software/12.1.0?topic=licensing-datapower-nano-gateway-deployment-profile-limits)
+
+Default profiles configured in this chart's `values.yaml`:
+
+| Subsystem | Value | Default |
+|---|---|---|
+| Management | `management.profile` | `n1xc2.m16` |
+| Analytics | `analytics.profile` | `n1xc2.m16` |
+| Developer Portal | `devportal.profile` | `n1xc2.m4` |
+| webMethods API Gateway | `wmapigateway.profile` | `n1xc3.m6` |
+| Nano Gateway (if enabled) | `nanogateway.profile` | `n1xc2.m4` |
+| Federated API Management | `federatedapimanagement.profile` | `n1xc3.m4` |
+
+On top of the subsystems above, budget CPU/memory for the operators themselves, deployed in wave 1: **~1.2 CPU / ~1.4Gi mem (requests) minimum, up to 5.5 CPU / 5.5Gi mem (limits)** — sum of `ibm-apiconnect`, the Nano Gateway operator and the Valkey operator (the only ones with resources fixed in this chart/repo). Common Services, ODLM and the EDB Postgres operator run alongside them but aren't shipped as manifests here.
+
+### Storage
+
+`global.storageClass` sets the default block storage class for all persistent volumes (default in `values.yaml`: `ocs-external-storagecluster-ceph-rbd` — OpenShift Data Foundation / Ceph RBD, `ReadWriteOnce`). Individual subsystems can override it via their own `<subsystem>.storageClass` (falls back to `global.storageClass` when left empty). See IBM's [Estimating storage requirements](https://www.ibm.com/docs/en/api-connect/software/12.1.1?topic=planning-estimating-storage-requirements) for sizing guidance per subsystem.
+
+Explicit volume sizes configured by this chart:
+
+| Subsystem | Value | Default |
+|---|---|---|
+| Analytics | `analytics.dataVolumeSize` | `100Gi` |
+| webMethods API Gateway | `wmapigateway.dataVolumeSize` | `10Gi` |
+| Valkey (if enabled) | `valkey.nodeConfStorageSize` | `1Gi` (node config volume, always created) |
+
+Other subsystems (Management, Developer Portal, Federated API Management) provision their own PVCs internally, sized by their `profile` rather than by this chart — see the IBM profile tables above.
+
+Valkey's actual data volumes are only created if `valkey.persistenceEnabled: true` (default `false`, i.e. in-memory only); size and count then depend on `valkey.clusterSize` / `leaderReplicas` / `followerReplicas`, not on a single chart value.
+
+A block storage class supporting dynamic provisioning is required; this chart does not use `ReadWriteMany` volumes.
+
+## Platform-level Prerequisites
+
+Everything in this section is **cluster-scoped**: it requires cluster-admin-level RBAC, is done once per cluster (not once per installation), and is owned by the **platform team**. The feature team does not need any of these permissions for the rest of this README.
+
+### Create the target namespace
+
+This chart never creates the namespace itself — it's an external prerequisite:
 ```bash
 export NAMESPACE=<your-namespace>
+oc create namespace $NAMESPACE
 ```
 
 ### Ensure cert manager is deployed in the OpenShift cluster
@@ -67,23 +111,51 @@ A copy of the catalog sources needed for this chart is included in this repo. In
 oc apply -f catalog-sources/12.1.1.0/catalog-sources-apiconnect.yaml
 ```
 
-### Nano Gateway prerequisites (if `nanogateway.enabled: true`)
+**Air-gapped clusters**: the command above points the catalog sources at the public IBM registry, which won't be reachable. Mirror the CASE packages' images to your own registry first and apply the mirrored catalog sources instead — see `airgapped-install.md` at the repo root for the full procedure.
 
-The Nano Gateway subsystem is managed by a dedicated `datapower-nano-operator` (deployed by this chart in wave 1, separate from the `ibm-apiconnect` operator subscription) and relies on its own CRDs, which Helm installs automatically from `crds/nanogateway-crds.yaml` the first time the chart is installed.
+### Apply the cluster-scoped CRDs (only if the Nano Gateway subsystem will be installed)
 
-Important: Helm does **not** update CRDs in the `crds/` folder on `helm upgrade`. If you upgrade to a chart version that ships newer Nano Gateway CRDs, apply them manually first:
+Not needed unless the feature team plans to deploy the Nano Gateway subsystem — check with them first. Installs the Nano Gateway CRDs, and the Valkey CRDs (unless the feature team runs Valkey outside this chart) — cluster-scoped, outside Helm (`oc apply`, not `helm install`).
+
 ```bash
-oc apply -f crds/nanogateway-crds.yaml
+oc apply -f cluster/crds/nanogateway-crds.yaml
+oc apply -f cluster/crds/valkey-crds.yaml   # skip if Valkey/Redis is run outside this chart
 ```
 
-On OpenShift clusters older than 4.19, the cluster-wide Gateway API CRDs are also required (not namespaced, not shipped by this chart):
+Safe to re-run (`oc apply` is idempotent). Unlike Helm's `crds/` convention, this is **not** a one-time-on-first-install step — re-run it whenever `cluster/crds/*.yaml` changes on a chart upgrade, since Helm never manages these files.
+
+If the target cluster is older than OpenShift 4.19, the cluster-wide Gateway API CRDs are also required (not namespaced, not shipped by this chart):
 ```bash
 oc apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
 ```
 
-Wave 1 checks that the Gateway API (`gateway.networking.k8s.io/v1`) is available in the target cluster before deploying the Nano Gateway operator, and fails with the instructions above if it is missing. This check requires a live cluster connection, so it always fails under `helm template` / `helm install --dry-run=client` / CI. Skip it explicitly in those contexts:
+Wave 1 checks that the Gateway API (`gateway.networking.k8s.io/v1`) is available in the target cluster before deploying the Nano Gateway operator, and fails with instructions if it is missing. This check requires a live cluster connection, so it always fails under `helm template` / `helm install --dry-run=client` / CI. Skip it explicitly in those contexts:
 ```bash
 --set nanogateway.skipGatewayApiCheck=true
+```
+
+### Apply the cluster-scoped RBAC (only if the Nano Gateway subsystem will be installed)
+
+Not needed unless the feature team plans to deploy the Nano Gateway subsystem — check with them first. Grants the Nano Gateway and Valkey operator ServiceAccounts (created later, namespace-scoped, in wave 1) the ClusterRole they need — outside Helm (`oc apply`, not `helm install`). The feature team never needs to run this, and its own namespace-scoped RBAC (see wave 1 below) does not grant these permissions.
+
+```bash
+envsubst '$NAMESPACE' < cluster/rbac/nanogateway-operator.yaml | oc apply -f -
+envsubst '$NAMESPACE' < cluster/rbac/valkey-operator.yaml | oc apply -f -   # skip if Valkey/Redis is run outside this chart
+```
+
+Or, both CRDs and RBAC together, via the Makefile:
+```bash
+make wave0 NAMESPACE=$NAMESPACE
+```
+
+If you deploy multiple `datapower-nano-operator` instances across several namespaces (one per feature team), the `ClusterRoleBinding` in `cluster/rbac/nanogateway-operator.yaml` needs one subject per namespace — add them manually before re-applying; `envsubst` only substitutes a single `$NAMESPACE` and will overwrite, not merge, the existing subjects list.
+
+## Feature-team-level Prerequisites
+
+Everything in this section is **namespace-scoped**, inside `$NAMESPACE` created by the platform team above. This is what the feature team runs, without needing any cluster-scoped permissions.
+
+```bash
+export NAMESPACE=<your-namespace>
 ```
 
 ### Creation of the pull secret
@@ -259,15 +331,17 @@ Note: logging into the FAM UI itself (`fam.<stackHost>/controlplane/login`) uses
 
 ## Deployment
 
-The chart uses a `deployment.wave` parameter to control which components are deployed:
+Wave 0 (see "Platform-level Prerequisites" above) must be applied by the platform team before any of the waves below. From wave 1 onward, everything is namespace-scoped and owned by the feature team via a `deployment.wave` parameter that controls which components are deployed:
 - wave 1: operators
 - wave 2: certificates
 - wave 3: subsystems (API manager, gateways, portals, analytics, ...)
 - wave 4: post-configuration (optional, see below)
 
-When using ArgoCD with this chart, you can set `deployment.wave` to the value "all", and configure ArgoCD to orchestrate the installation using the argocd.argoproj.io/sync-wave annotation that's in the Helm templates.  
+The ServiceAccounts created in wave 1 (`datapower-nano-operator`, `valkey-operator`) bind to the ClusterRoles the platform team created in wave 0, but wave 1 itself never creates any cluster-scoped object — a feature team with only namespace-scoped RBAC can run it as-is.
 
-A `Makefile` at the repo root wraps the commands below (waves 1-4, wave 4 image build/push, lint/template, logs, uninstall) — run `make help` from the repo root for the full list. The manual commands are documented here for reference and for environments without `make`.
+When using ArgoCD with this chart, you can set `deployment.wave` to the value "all" for waves 1-4, and configure ArgoCD to orchestrate the installation using the argocd.argoproj.io/sync-wave annotation that's in the Helm templates. Wave 0 is outside Helm/ArgoCD's chart lifecycle and must be applied separately (e.g. as a distinct ArgoCD Application/sync-wave owned by the platform team, or manually).
+
+A `Makefile` at the repo root wraps the commands below (waves 0-4, wave 4 image build/push, lint/template, logs, uninstall) — run `make help` from the repo root for the full list. The manual commands are documented here for reference and for environments without `make`.
 
 ### Wave 1 - Deploy Operators
 
@@ -408,3 +482,10 @@ helm uninstall apic-operators -n $NAMESPACE
 ```
   
 Clean up secrets if needed
+
+Wave 0 (cluster-scoped CRDs and ClusterRole/ClusterRoleBinding) is not removed by the above, and generally shouldn't be — it's shared, cluster-admin-owned setup. If you do need to tear it down (e.g. decommissioning the cluster), the platform team removes it separately:
+```bash
+oc delete -f cluster/crds/nanogateway-crds.yaml
+oc delete -f cluster/crds/valkey-crds.yaml
+oc delete clusterrole,clusterrolebinding datapower-nano-operator valkey-operator
+```

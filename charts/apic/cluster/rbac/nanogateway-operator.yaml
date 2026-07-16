@@ -1,0 +1,177 @@
+# =============================================================================
+# Wave 0 – Nano Gateway Operator cluster-scoped RBAC
+# Applied via `oc apply` (envsubst for $NAMESPACE), not by Helm.
+# Requires cluster-admin-level privileges (ClusterRole/ClusterRoleBinding
+# creation) — this is the platform team's responsibility, not the feature
+# team's. The datapower-nano-operator ServiceAccount itself, and the
+# Deployment that uses this binding, are created in wave 1
+# (templates/nanogateway-operator.yaml), namespace-scoped, by the feature
+# team.
+# =============================================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: datapower-nano-operator
+  labels:
+    app.kubernetes.io/managed-by: kubectl
+    app.kubernetes.io/part-of: ibm-apiconnect
+rules:
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - get
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gatewayclasses
+  - gateways
+  - httproutes
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gatewayclasses/status
+  - gateways/status
+  - httproutes/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - nano.datapower.ibm.com
+  resources:
+  - apis
+  - apisets
+  - assemblies
+  - autoscaleconfigs
+  - jwtproviders
+  - managements
+  - mcptools
+  - oauthproviders
+  - runtimeconfigs
+  - runtimes
+  - tlsclientprofiles
+  - tlsserverprofiles
+  - userdefinedpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - nano.datapower.ibm.com
+  resources:
+  - apis/status
+  - apisets/status
+  - assemblies/status
+  - autoscaleconfigs/status
+  - jwtproviders/status
+  - managements/scale
+  - managements/status
+  - mcptools/status
+  - oauthproviders/status
+  - runtimeconfigs/status
+  - runtimes/scale
+  - runtimes/status
+  - tlsclientprofiles/status
+  - tlsserverprofiles/status
+  - userdefinedpolicies/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - roles
+  - rolebindings
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - autoscaling
+  resources:
+  - horizontalpodautoscalers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: datapower-nano-operator
+  labels:
+    app.kubernetes.io/managed-by: kubectl
+    app.kubernetes.io/part-of: ibm-apiconnect
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: datapower-nano-operator
+subjects:
+- kind: ServiceAccount
+  name: datapower-nano-operator
+  namespace: $NAMESPACE
