@@ -55,12 +55,73 @@ spec:
     license: {{ .Values.global.license.id | quote }}
     metric: {{ .Values.global.license.metric }}
     use: {{ .Values.global.license.use }}
-  {{- if .Values.wmapigateway.customImage }}
+  {{- $ext := .Values.wmapigateway.externalJars }}
+  {{- if or .Values.wmapigateway.customImage ($ext.enabled) }}
   template:
   - name: apigateway
     containers:
     - name: apigateway
+      {{- if .Values.wmapigateway.customImage }}
       image: {{ .Values.wmapigateway.customImage }}
+      {{- end }}
+      {{- if $ext.enabled }}
+      {{- $auth := $ext.auth }}
+      {{- $proxy := $ext.proxy }}
+      {{- $ts := $ext.truststore }}
+      # The CRD has no volumeMounts; to inject extra jars without rebuilding the
+      # image we override the entrypoint. This shell preamble fetches each jar
+      # from the artifact repo (fail-fast via `curl -f` + `set -e`, so a fetch
+      # failure aborts startup rather than launching without the driver),
+      # optionally verifies its sha256, then exec's the base image's real
+      # entrypoint. Runs on every container start.
+      cmd:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        mkdir -p {{ $ext.targetDir }}
+        {{- if $ts.enabled }}
+        # Materialise the custom CA (injected via env) for curl --cacert.
+        printf '%s' "$ARTIFACT_CA" > "{{ $ts.caPath }}"
+        {{- end }}
+        {{- range $ext.jars }}
+        {{- $dest := printf "%s/%s" $ext.targetDir (base .path) }}
+        curl -fsS \
+          {{- if $ts.enabled }}
+          --cacert "{{ $ts.caPath }}" \
+          {{- end }}
+          {{- if $proxy.enabled }}
+          --proxy "{{ $proxy.url }}" --noproxy "{{ $proxy.noProxy }}" \
+          {{- end }}
+          {{- if $auth.enabled }}
+          -H "{{ $auth.headerName }}: $ARTIFACT_AUTH" \
+          {{- end }}
+          "$ARTIFACT_REPO_BASE_URL/{{ .path }}" \
+          -o "{{ $dest }}"
+        {{- if .sha256 }}
+        echo "{{ .sha256 }}  {{ $dest }}" | sha256sum -c -
+        {{- end }}
+        {{- end }}
+        exec {{ $ext.imageEntrypoint }}
+      env:
+      - name: ARTIFACT_REPO_BASE_URL
+        value: {{ $ext.repoBaseURL | quote }}
+      {{- if $auth.enabled }}
+      - name: ARTIFACT_AUTH
+        valueFrom:
+          secretKeyRef:
+            name: {{ $auth.secretName }}
+            key: {{ $auth.secretKey }}
+      {{- end }}
+      {{- if $ts.enabled }}
+      - name: ARTIFACT_CA
+        valueFrom:
+          secretKeyRef:
+            name: {{ $ts.secretName }}
+            key: {{ $ts.secretKey }}
+      {{- end }}
+      {{- end }}
   {{- end }}
 {{- end }}
 

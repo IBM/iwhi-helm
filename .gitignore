@@ -7,3 +7,4 @@ release-files
 *.crt
 *.key
 *.pem
+secret*.y*ml

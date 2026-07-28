@@ -285,6 +285,24 @@ Exposed routes:
 - `wmapigateway-ui.<stackHost>` - webMethods API Gateway UI
 - `wmapigateway-mgmt.<stackHost>` - Management endpoint
 
+**External jars (runtime injection):**
+
+Fetches extra jars (e.g. JMS drivers) from an artifact repo onto the Integration
+Server classpath at container startup. Enable it to add jars without a custom
+image.
+
+- `wmapigateway.externalJars.enabled` - set to `true` to activate the fetch (default `false`)
+- `wmapigateway.externalJars.repoBaseURL` - base URL of the artifact repo (no trailing slash)
+- `wmapigateway.externalJars.targetDir` - classpath directory the jars are written to (default `/opt/webmethods/IntegrationServer/lib/jars/custom`)
+- `wmapigateway.externalJars.jars[]` - list of `{ path, sha256? }`; pin the version in `path` for deterministic restarts, set `sha256` to verify integrity (a mismatch fails startup)
+- `wmapigateway.externalJars.auth.*` - single HTTP auth header, value read from a secret (covers Basic / Bearer / API-key)
+- `wmapigateway.externalJars.truststore.*` - optional custom CA (from a secret) for HTTPS repos with an internal CA
+- `wmapigateway.externalJars.proxy.*` - optional forward proxy for reaching the repo (air-gapped setups)
+
+See `examples/values-externaljars.yaml` for a worked example (Tibco EMS JMS
+drivers over HTTPS with basic auth, a custom CA, and pinned digests), including
+the prerequisite secrets to create.
+
 **Nano Gateway subsystem parameters:**
 - `nanogateway.enabled` - set to `true` to deploy this subsystem (disabled by default; also deploys its dedicated operator in wave 1, which requires Gateway API - see prerequisites above)
 - `nanogateway.skipGatewayApiCheck` - set to `true` to bypass the Gateway API availability check in wave 1 (required for `helm template` / `--dry-run=client` / CI, which have no live cluster to check against)

@@ -203,6 +203,68 @@ wmapigateway:
   # custom packages) instead of the operator's default image. Leave empty to
   # use the default. See wmapigateway/README.md for build instructions.
   customImage: ""   # e.g. image-registry.openshift-image-registry.svc:5000/apic/apic-wmapigateway:custom
+  # Runtime injection of extra jars (e.g. JMS drivers) into the apigateway
+  # container, fetched at container startup from an artifact repo
+  # (Nexus/Artifactory/JFrog/…) instead of being baked into the image. The CRD
+  # exposes no volumeMounts, so this works by overriding the container
+  # entrypoint (cmd/args): a small shell preamble curl's each jar into
+  # targetDir, then exec's the image's real entrypoint. Runs on every start.
+  externalJars:
+    enabled: false
+    # Base URL of the artifact repo serving the jars (no trailing slash).
+    repoBaseURL: "https://nexus.example.com/repository/jms-raw"
+    # Directory inside the container to drop the jars into. Must be on the
+    # Integration Server classpath and writable by the runtime uid (gid 0).
+    targetDir: /opt/webmethods/IntegrationServer/lib/jars/custom
+    # Jars to fetch. Each entry is an object:
+    #   path:   appended to repoBaseURL; pin the version in the path
+    #           (e.g. tibco/8.5.1/tibjms.jar) so restarts are deterministic.
+    #           The basename is the local filename in targetDir.
+    #   sha256: optional integrity digest. When set, the downloaded file is
+    #           verified with `sha256sum -c` (present in the image); a mismatch
+    #           aborts startup (fail-fast) rather than loading a tampered jar.
+    # See examples/values-externaljars.yaml for a worked example.
+    jars: []
+    #  - path: tibco/8.5.1/tibjms.jar
+    #    sha256: "<hex digest>"
+    # Authentication against the artifact repo, sent as a single HTTP header:
+    #   curl -H "<headerName>: $<value from secret>"
+    # This one shape covers every case (curl-only, no extra tooling):
+    #   - Basic     -> headerName: Authorization, secret value "Basic <base64>"
+    #   - Bearer    -> headerName: Authorization, secret value "Bearer <token>"
+    #   - API key   -> headerName: X-JFrog-Art-Api, secret value "<apikey>"
+    # The scheme prefix (Basic / Bearer) is part of the secret value. Leave
+    # enabled: false to fetch from an open repo with no auth header.
+    auth:
+      enabled: true
+      headerName: Authorization
+      # Existing secret + key holding the full header value.
+      secretName: wmapigateway-artifact-creds
+      secretKey: headerValue
+    # Optional custom CA to trust when the repo is HTTPS with an internal /
+    # enterprise CA not in the image trust store (common in air-gapped setups).
+    # The CA PEM is injected as an env var from a secret (no volumeMount is
+    # available on this CRD); the entrypoint writes it to caPath and passes it
+    # to curl via --cacert. Leave disabled if the repo cert already chains to a
+    # CA trusted by the image.
+    truststore:
+      enabled: false
+      # Existing secret + key holding the CA bundle in PEM format.
+      secretName: wmapigateway-artifact-ca
+      secretKey: ca.crt
+      # Writable path where the entrypoint materialises the CA before use.
+      caPath: /tmp/artifact-repo-ca.pem
+    # Optional HTTP(S) proxy for reaching the repo (common in air-gapped setups
+    # where egress goes through a forward proxy). When enabled, curl uses
+    # --proxy <url> and --noproxy <noProxy>. Leave disabled for a direct route.
+    proxy:
+      enabled: false
+      url: "http://proxy.example.com:3128"
+      # Comma-separated hosts/domains that bypass the proxy (curl --noproxy).
+      noProxy: ".svc.cluster.local,localhost,127.0.0.1"
+    # Real entrypoint of the base image, exec'd after the jars are fetched.
+    # Verified on the running pod: /opt/webmethods/IntegrationServer/bin/startContainer.sh
+    imageEntrypoint: /opt/webmethods/IntegrationServer/bin/startContainer.sh
 
 # -----------------------------------------------------------------------------
 # Valkey key-value store (waves 1/2/3) – required by the Nano Gateway subsystem

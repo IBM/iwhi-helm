@@ -1,0 +1,39 @@
+# Example: inject external JMS driver jars into the API Gateway at runtime,
+# fetched from an artifact repo instead of baking them into the image.
+#
+# Overlay this on top of a base values file, e.g.:
+#   helm install apic-subsystems . \
+#     -f examples/values-clusterissuer.yaml \
+#     -f examples/values-externaljars.yaml \
+#     --set deployment.wave=3 -n apic
+#
+# Prerequisite secrets in the target namespace:
+#   wmapigateway-artifact-creds  key: headerValue  ("Basic <b64>" | "Bearer <token>" | "<apikey>")
+#   wmapigateway-artifact-ca     key: ca.crt       (repo CA in PEM, only if truststore.enabled)
+
+wmapigateway:
+  externalJars:
+    enabled: true
+    repoBaseURL: "https://nexus.example.com/repository/jms-raw"
+    targetDir: /opt/webmethods/IntegrationServer/lib/jars/custom
+    # Tibco EMS JMS driver jars. Versions pinned in the path so restarts are
+    # deterministic; sha256 verified after download (fail-fast on mismatch).
+    jars:
+      - path: tibco/8.5.1/jms-2.0.jar
+        sha256: "9eff7170609b42781acdd86cfea025f390a91ec313e1c58aca30c657d1bf2e91"
+      - path: tibco/8.5.1/tibemsd_sec.jar
+        sha256: "c194b3e467817234326c56a478fb1a7902cebc794689bd288b324da32dc8f347"
+      - path: tibco/8.5.1/tibjms.jar
+        sha256: "55a3bda0408fbc9b65191a95920a8c22fce2679f1bac315800077c466befc42a"
+    auth:
+      enabled: true
+      headerName: Authorization
+      secretName: wmapigateway-artifact-creds
+      secretKey: headerValue
+    truststore:
+      enabled: true
+      secretName: wmapigateway-artifact-ca
+      secretKey: ca.crt
+      caPath: /tmp/artifact-repo-ca.pem
+    proxy:
+      enabled: false
