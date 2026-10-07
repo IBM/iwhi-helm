@@ -1,0 +1,49 @@
+---
+# One entry of apic_porg_catalog_tls_client_profiles: {{ _apic_tls_profile }}
+# ("name" or "name:version"), for catalog {{ _apic_catalog.name }}.
+
+- name: "Resolve profile {{ _apic_tls_profile }}"
+  ansible.builtin.set_fact:
+    _apic_tls_name: "{{ _apic_tls_profile.split(':')[0] }}"
+    _apic_tls_version: "{{ _apic_tls_profile.split(':')[1] if (':' in _apic_tls_profile) else '' }}"
+
+- name: "Set URL facts for profile {{ _apic_tls_profile }}"
+  ansible.builtin.set_fact:
+    _apic_org_tls_url: >-
+      {{ (_apic_org_tls_client_profiles.json.results
+          | selectattr('name', 'equalto', _apic_tls_name)
+          | selectattr('version', 'match', '^' ~ (_apic_tls_version | regex_escape) ~ ('$' if _apic_tls_version | length > 0 else ''))
+          | map(attribute='url') | first) | default('', true) }}
+    _apic_catalog_tls_present: >-
+      {{ (_apic_catalog_tls_client_profiles.json.results
+          | selectattr('name', 'equalto', _apic_tls_name)
+          | selectattr('version', 'match', '^' ~ (_apic_tls_version | regex_escape) ~ ('$' if _apic_tls_version | length > 0 else ''))
+          | list | length) > 0 }}
+
+- name: "TLS client profile {{ _apic_tls_profile }} absent notice"
+  ansible.builtin.debug:
+    msg: >-
+      TLS client profile {{ _apic_tls_profile }} does not exist in provider org
+      {{ _apic_porg_name }}; skipping it for catalog {{ _apic_catalog.name }}.
+  when: _apic_org_tls_url | length == 0
+
+- name: "Add TLS client profile {{ _apic_tls_profile }} to catalog {{ _apic_catalog.name }}"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/{{ _apic_catalog.name }}/configured-tls-client-profiles"
+    method: POST
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers_json }}"
+    body_format: json
+    body:
+      tls_client_profile_url: "{{ _apic_org_tls_url }}"
+    status_code: [201]
+  when:
+    - _apic_org_tls_url | length > 0
+    - not (_apic_catalog_tls_present | bool)
+
+- name: "TLS client profile {{ _apic_tls_profile }} already configured notice"
+  ansible.builtin.debug:
+    msg: "TLS client profile {{ _apic_tls_profile }} already configured in catalog {{ _apic_catalog.name }}."
+  when:
+    - _apic_org_tls_url | length > 0
+    - _apic_catalog_tls_present | bool

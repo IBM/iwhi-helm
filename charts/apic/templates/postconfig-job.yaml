@@ -76,10 +76,13 @@ spec:
               "apic_namespace" (include "apic.namespace" .)
               "apic_mgmt_instance" "management"
               "apic_analytics_instance" "analytics"
+              "apic_dpgateway_instance" "gateway"
               "apic_wmapigateway_instance" "wmapigateway"
               "apic_nanogateway_instance" "ngw"
               "apic_wmdevportal_instance" "devportal"
               "apic_fam_instance" "fam"
+              "apic_porg_catalogs" .Values.postConfig.catalogs
+              "apic_porg_catalog_tls_client_profiles" .Values.postConfig.catalogTlsClientProfiles
               "apic_porg_name" .Values.postConfig.providerOrg.name
               "apic_porg_title" .Values.postConfig.providerOrg.title
               "apic_porg_user_id" .Values.postConfig.providerOrg.admin.username

@@ -14,7 +14,7 @@ metadata:
   labels:
     {{- include "apic.labels" . | nindent 4 }}
 spec:
-  version: {{ .Values.global.appProductVersion }}
+  version: {{ include "apic.version" (dict "root" . "kind" "FederatedAPIManagementCluster") }}
   profile: {{ .Values.federatedapimanagement.profile }}
   imagePullSecrets:
     - {{ .Values.global.imagePullSecret }}
@@ -42,7 +42,7 @@ spec:
   license:
     accept: {{ .Values.global.license.accept }}
     use: {{ .Values.global.license.use }}
-    license: {{ .Values.global.license.id | quote }}
+    license: {{ include "apic.licenseId" (dict "root" . "kind" "FederatedAPIManagementCluster") | quote }}
 {{- end }}
 
 

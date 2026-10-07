@@ -1,0 +1,20 @@
+---
+# Configures in catalog {{ _apic_catalog.name }} the org-level TLS client
+# profiles listed in apic_porg_catalog_tls_client_profiles ("name" or
+# "name:version"), if not already configured there. A profile that doesn't
+# exist in the provider org is reported and skipped.
+
+- name: "List TLS client profiles already configured in catalog {{ _apic_catalog.name }}"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/{{ _apic_catalog.name }}/configured-tls-client-profiles"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_catalog_tls_client_profiles
+
+- name: "Add each TLS client profile to catalog {{ _apic_catalog.name }}"
+  ansible.builtin.include_tasks: add_one_tls_client_profile.yml
+  loop: "{{ apic_porg_catalog_tls_client_profiles }}"
+  loop_control:
+    loop_var: _apic_tls_profile

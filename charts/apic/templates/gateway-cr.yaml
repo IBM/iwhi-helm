@@ -1,0 +1,65 @@
+{{- $wave := .Values.deployment.wave | toString }}
+{{- $gw := .Values.dpapigateway }}
+{{- if and $gw.enabled (or (eq $wave "3") (eq $wave "all")) }}
+# =============================================================================
+# Wave 3 – GatewayCluster CR (DataPower API Gateway)
+# =============================================================================
+apiVersion: gateway.apiconnect.ibm.com/v1beta1
+kind: GatewayCluster
+metadata:
+  name: gateway
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+    {{- include "apic.ingressIssuerAnnotation" . | nindent 4 }}
+  labels:
+    app.kubernetes.io/name: ibm-apiconnect
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  # No secretName or cert-manager.io/issuer annotation is set on any host
+  # below: per the "Default issuers and automatic certificate management"
+  # docs (API Connect 12.1.1+), leaving both unset lets the operator
+  # auto-configure the endpoint — either against its own auto-created
+  # "apic-ingress-issuer" (mode: operator) or against the issuer referenced by
+  # the CR-level annotation above (mode: existing).
+  gatewayEndpoint:
+    hosts:
+    - name: gateway-gw.{{ .Values.global.stackHost }}
+  gatewayManagerEndpoint:
+    hosts:
+    - name: gateway-gwd.{{ .Values.global.stackHost }}
+  version: {{ include "apic.version" (dict "root" . "kind" "GatewayCluster") }}
+  profile: {{ $gw.profile }}
+  replicaCount: {{ $gw.replicaCount }}
+  imagePullSecrets:
+  - {{ .Values.global.imagePullSecret }}
+  imageRegistry: {{ include "apic.imageRegistry" (dict "subsystem" $gw "global" .Values.global) }}
+  microServiceSecurity: certManager
+  certManagerIssuer:
+    name: "selfsigning-issuer"
+    kind: "Issuer"
+  # Secrets created by the wave 2 certificates (gateway-service, gateway-peering).
+  apicGatewayServiceTLS:
+    secretName: gateway-service
+  apicGatewayPeeringTLS:
+    secretName: gateway-peering
+  apicGatewayServiceV5CompatibilityMode: {{ $gw.v5CompatibilityMode }}
+  datapowerLogLevel: {{ $gw.logLevel }}
+  mtlsValidateClient: {{ $gw.mtlsValidateClient }}
+  tokenManagementService:
+    enabled: {{ $gw.tokenManagementService.enabled }}
+    {{- if $gw.tokenManagementService.enabled }}
+    storage:
+      storageClassName: {{ include "apic.storageClass" (dict "subsystem" $gw "global" .Values.global) }}
+      volumeSize: {{ $gw.tokenManagementService.volumeSize }}
+    {{- end }}
+  {{- if $gw.adminSecret.enabled }}
+  adminUser:
+    secretName: {{ $gw.adminSecret.name }}
+  {{- end }}
+  license:
+    accept: {{ .Values.global.license.accept }}
+    license: {{ include "apic.licenseId" (dict "root" . "kind" "GatewayCluster") | quote }}
+    metric: {{ .Values.global.license.metric }}
+    use: {{ .Values.global.license.use }}
+{{- end }}

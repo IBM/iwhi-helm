@@ -1,0 +1,26 @@
+---
+# Runs once per provider org name ({{ _apic_porg_name }}).
+
+- name: "List user registries of provider org {{ _apic_porg_name }}"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/orgs/{{ _apic_porg_name }}/user-registries"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_org_registries
+
+- name: "List catalogs of provider org {{ _apic_porg_name }}"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/orgs/{{ _apic_porg_name }}/catalogs"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_org_catalogs
+
+- name: "Ensure the consumer org of each catalog"
+  ansible.builtin.include_tasks: ensure_consumer_org.yml
+  loop: "{{ apic_porg_catalogs | selectattr('consumerOrg', 'defined') | list }}"
+  loop_control:
+    loop_var: _apic_catalog

@@ -1,9 +1,10 @@
 ---
 # Equivalent of cp4i-demo scripts/87t-apic-porg-config-gtwys.sh:
 #   - for every user recorded in the porg-lur-users-info state secret,
-#     for every provider org they own, add every deployed gateway service
-#     (api-gateway-service, nano-gateway-service, wm-gateway-service) to the
-#     Sandbox catalog, if not already configured there.
+#     for every provider org they own, create one catalog per entry of
+#     apic_porg_catalogs and configure in it its own gateway service
+#     (api-gateway-service, nano-gateway-service or wm-gateway-service), if
+#     that service is deployed and not already configured there.
 
 - name: "Read porg-lur-users-info state secret"
   kubernetes.core.k8s_info:

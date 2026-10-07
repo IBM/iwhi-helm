@@ -2,7 +2,7 @@
 {{- if and .Values.subscriptions.enabled (or (eq $wave "1") (eq $wave "all")) }}
 # =============================================================================
 # Wave 1 – Operator Subscriptions
-# Both subscriptions are created after the OperatorGroup (wave 1).
+# The subscriptions are created after the OperatorGroup (wave 1).
 # The API Connect operator depends on IBM Common Services being available.
 # =============================================================================
 
@@ -22,6 +22,25 @@ spec:
   name: {{ .Values.subscriptions.commonServices.name }}
   source: {{ .Values.subscriptions.commonServices.source }}
   sourceNamespace: {{ .Values.subscriptions.commonServices.sourceNamespace }}
+
+{{- if .Values.subscriptions.datapower.enabled }}
+---
+# IBM DataPower Operator Subscription (prerequisite of API Connect)
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: {{ .Values.subscriptions.datapower.name }}
+  namespace: {{ include "apic.namespace" . }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "apic.labels" . | nindent 4 }}
+spec:
+  channel: {{ .Values.subscriptions.datapower.channel }}
+  name: {{ .Values.subscriptions.datapower.name }}
+  source: {{ .Values.subscriptions.datapower.source }}
+  sourceNamespace: {{ .Values.subscriptions.datapower.sourceNamespace }}
+{{- end }}
 
 ---
 # IBM API Connect Subscription

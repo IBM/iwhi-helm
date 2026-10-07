@@ -15,7 +15,7 @@ metadata:
     {{- include "apic.labels" . | nindent 4 }}
 spec:
   profile: {{ .Values.nanogateway.profile }}
-  version: {{ .Values.global.appProductVersion }}
+  version: {{ include "apic.version" (dict "root" . "kind" "NanoGatewayCluster") }}
   imagePullSecrets:
   - {{ .Values.global.imagePullSecret }}
   imageRegistry: {{ include "apic.imageRegistry" (dict "subsystem" .Values.nanogateway "global" .Values.global) }}
@@ -46,7 +46,7 @@ spec:
   license:
     accept: {{ .Values.global.license.accept }}
     use: {{ .Values.global.license.use }}
-    license: {{ .Values.global.license.id | quote }}
+    license: {{ include "apic.licenseId" (dict "root" . "kind" "NanoGatewayCluster") | quote }}
 {{- end }}
 
 

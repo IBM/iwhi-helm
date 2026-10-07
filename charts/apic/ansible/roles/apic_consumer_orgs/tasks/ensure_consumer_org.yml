@@ -1,0 +1,160 @@
+---
+# Runs once per catalog ({{ _apic_catalog.name }}) within provider org
+# {{ _apic_porg_name }}. NOTE: a block's `when` is re-evaluated for EACH task
+# inside it, so no task in a block may modify a fact used by that block's
+# `when` (see apic_porg_lur). Resolved facts below are set once, before.
+
+- name: "Resolve catalog, registry and owner facts for {{ _apic_catalog.name }}"
+  ansible.builtin.set_fact:
+    _apic_cu_catalog: >-
+      {{ (_apic_org_catalogs.json.results
+          | selectattr('name', 'equalto', _apic_catalog.name) | list | first) | default({}, true) }}
+    _apic_cu_registry: >-
+      {{ (_apic_org_registries.json.results
+          | selectattr('name', 'equalto', _apic_catalog.name ~ '-catalog') | list | first) | default({}, true) }}
+    _apic_cu_owner: "{{ _apic_catalog.consumerOrg.owner }}"
+
+- name: "Catalog or registry absent notice for {{ _apic_catalog.name }}"
+  ansible.builtin.debug:
+    msg: >-
+      Catalog {{ _apic_catalog.name }} or its user registry
+      {{ _apic_catalog.name }}-catalog does not exist in {{ _apic_porg_name }};
+      skipping its consumer org.
+  when: (_apic_cu_catalog | length == 0) or (_apic_cu_registry | length == 0)
+
+- name: "Configure the consumer org of catalog {{ _apic_catalog.name }}"
+  when:
+    - _apic_cu_catalog | length > 0
+    - _apic_cu_registry | length > 0
+  block:
+    - name: "List users of registry {{ _apic_cu_registry.name }}"
+      ansible.builtin.uri:
+        url: "{{ _apic_cu_registry.url }}/users"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_cu_users
+
+    - name: "Set owner URL fact from existing user"
+      ansible.builtin.set_fact:
+        _apic_cu_user_url_existing: >-
+          {{ (_apic_cu_users.json.results
+              | selectattr('username', 'equalto', _apic_cu_owner.username)
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "Read the consumer users state secret"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: "{{ apic_consumer_state_secret_name }}"
+        namespace: "{{ apic_namespace }}"
+      register: _apic_cu_state_secret
+
+    - name: "Decode the consumer users state document"
+      ansible.builtin.set_fact:
+        _apic_cu_state_users: >-
+          {{ ((_apic_cu_state_secret.resources[0].data['consumer-org-users-config.json'] | b64decode | from_json).users)
+             if (_apic_cu_state_secret.resources | length > 0) else [] }}
+      no_log: true
+
+    - name: "New owner user block"
+      when: _apic_cu_user_url_existing | length == 0
+      block:
+        - name: "Generate a password for the owner"
+          ansible.builtin.set_fact:
+            _apic_cu_new_password: "{{ lookup('password', '/dev/null length=20 chars=ascii_lowercase,digits') }}"
+          no_log: true
+
+        - name: "Create the owner in registry {{ _apic_cu_registry.name }}"
+          ansible.builtin.uri:
+            url: "{{ _apic_cu_registry.url }}/users"
+            method: POST
+            validate_certs: "{{ apic_validate_certs }}"
+            headers: "{{ apic_auth_headers_json }}"
+            body_format: json
+            body:
+              type: user
+              api_version: "2.0.0"
+              name: "{{ _apic_cu_owner.username }}"
+              title: "{{ _apic_cu_owner.username }}"
+              state: enabled
+              identity_provider: "{{ (_apic_cu_registry.identity_providers | default([]) | map(attribute='name') | list | first) | default(_apic_catalog.name ~ '-idp', true) }}"
+              username: "{{ _apic_cu_owner.username }}"
+              email: "{{ _apic_cu_owner.email }}"
+              first_name: "{{ _apic_cu_owner.firstName | default(_apic_cu_owner.username) }}"
+              last_name: "{{ _apic_cu_owner.lastName | default('Consumer') }}"
+              password: "{{ _apic_cu_new_password }}"
+            status_code: [201]
+          register: _apic_cu_user_created
+          no_log: true
+
+        - name: "Persist the consumer users state secret"
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: "{{ apic_consumer_state_secret_name }}"
+                namespace: "{{ apic_namespace }}"
+              stringData:
+                consumer-org-users-config.json: >-
+                  {{ {'users': (_apic_cu_state_users
+                       | rejectattr('userId', 'equalto', _apic_cu_owner.username) | list)
+                       + [{'userId': _apic_cu_owner.username,
+                           'password': _apic_cu_new_password,
+                           'catalog': _apic_catalog.name,
+                           'consumerOrg': _apic_catalog.consumerOrg.name,
+                           'porgName': _apic_porg_name}]} | to_json }}
+          no_log: true
+
+        - name: "Report the new owner"
+          ansible.builtin.debug:
+            msg: >-
+              Consumer owner {{ _apic_cu_owner.username }} created in
+              {{ _apic_cu_registry.name }}. Password stored in secret
+              {{ apic_consumer_state_secret_name }} (namespace {{ apic_namespace }}).
+
+    # Resolved once, after the block above (which must not touch the facts
+    # used by its own `when`).
+    - name: "Resolve final owner URL"
+      ansible.builtin.set_fact:
+        _apic_cu_user_url: >-
+          {{ _apic_cu_user_url_existing
+             if (_apic_cu_user_url_existing | length > 0)
+             else _apic_cu_user_created.json.url }}
+
+    - name: "List consumer orgs of catalog {{ _apic_catalog.name }}"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/{{ _apic_catalog.name }}/consumer-orgs"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_cu_corgs
+
+    - name: "Create consumer org {{ _apic_catalog.consumerOrg.name }}"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/{{ _apic_catalog.name }}/consumer-orgs"
+        method: POST
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers_json }}"
+        body_format: json
+        body:
+          type: consumer_org
+          api_version: "2.0.0"
+          name: "{{ _apic_catalog.consumerOrg.name }}"
+          title: "{{ _apic_catalog.consumerOrg.title | default(_apic_catalog.consumerOrg.name) }}"
+          summary: "{{ _apic_catalog.consumerOrg.title | default(_apic_catalog.consumerOrg.name) }}"
+          state: enabled
+          owner_url: "{{ _apic_cu_user_url }}"
+          org_url: "{{ _apic_cu_registry.org_url }}"
+          catalog_url: "{{ _apic_cu_catalog.url }}"
+        status_code: [201]
+      when: _apic_catalog.consumerOrg.name not in (_apic_cu_corgs.json.results | map(attribute='name') | list)
+
+    - name: "Consumer org {{ _apic_catalog.consumerOrg.name }} already exists notice"
+      ansible.builtin.debug:
+        msg: "Consumer org {{ _apic_catalog.consumerOrg.name }} already exists in catalog {{ _apic_catalog.name }}."
+      when: _apic_catalog.consumerOrg.name in (_apic_cu_corgs.json.results | map(attribute='name') | list)

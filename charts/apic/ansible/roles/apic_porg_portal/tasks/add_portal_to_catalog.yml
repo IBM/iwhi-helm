@@ -1,47 +1,58 @@
 ---
-# Runs once per fixed portal service name ({{ _apic_ptl_name }}), within
-# provider org {{ _apic_porg_name }}.
+# Runs once per catalog ({{ _apic_catalog.name }}) within provider org
+# {{ _apic_porg_name }}: configures portal service {{ _apic_catalog.portal }}.
+# Catalogs that don't exist (their gateway service isn't deployed) are skipped.
 
-- name: "Set already-configured URL fact for {{ _apic_ptl_name }}"
-  ansible.builtin.set_fact:
-    _apic_catalog_ptl_url: >-
-      {{ (_apic_catalog_portal_services.json.results
-          | selectattr('name', 'equalto', _apic_ptl_name)
-          | map(attribute='url') | first) | default('', true) }}
-
-- name: "Set org-visible URL fact for {{ _apic_ptl_name }}"
-  ansible.builtin.set_fact:
-    _apic_porg_ptl_url: >-
-      {{ (_apic_porg_portal_services.json.results
-          | selectattr('name', 'equalto', _apic_ptl_name)
-          | map(attribute='url') | first) | default('', true) }}
-
-- name: "Add {{ _apic_ptl_name }} to the Sandbox catalog of {{ _apic_porg_name }}"
-  ansible.builtin.uri:
-    url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/sandbox/configured-portal-services"
-    method: POST
-    validate_certs: "{{ apic_validate_certs }}"
-    headers: "{{ apic_auth_headers_json }}"
-    body_format: json
-    body:
-      portal_service_url: "{{ _apic_porg_ptl_url }}"
-    status_code: [201]
-  when:
-    - _apic_catalog_ptl_url | length == 0
-    - _apic_porg_ptl_url | length > 0
-
-- name: "{{ _apic_ptl_name }} not deployed notice"
+- name: "Catalog {{ _apic_catalog.name }} absent notice"
   ansible.builtin.debug:
-    msg: >-
-      Portal service {{ _apic_ptl_name }} is not available in this
-      environment; skipping for provider org {{ _apic_porg_name }}.
-  when:
-    - _apic_catalog_ptl_url | length == 0
-    - _apic_porg_ptl_url | length == 0
+    msg: "Catalog {{ _apic_catalog.name }} does not exist in {{ _apic_porg_name }}; skipping its portal."
+  when: _apic_catalog.name not in (_apic_org_catalogs.json.results | map(attribute='name') | list)
 
-- name: "{{ _apic_ptl_name }} already configured notice"
-  ansible.builtin.debug:
-    msg: >-
-      Portal service {{ _apic_ptl_name }} already configured in the Sandbox
-      catalog of provider org {{ _apic_porg_name }}.
-  when: _apic_catalog_ptl_url | length > 0
+- name: "Connect catalog {{ _apic_catalog.name }} to {{ _apic_catalog.portal }}"
+  when: _apic_catalog.name in (_apic_org_catalogs.json.results | map(attribute='name') | list)
+  block:
+    - name: "List portal services already configured in catalog {{ _apic_catalog.name }}"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/{{ _apic_catalog.name }}/configured-portal-services"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_catalog_portal_services
+
+    - name: "Set URL facts for {{ _apic_catalog.portal }}"
+      ansible.builtin.set_fact:
+        _apic_catalog_ptl_url: >-
+          {{ (_apic_catalog_portal_services.json.results
+              | selectattr('name', 'equalto', _apic_catalog.portal)
+              | map(attribute='url') | first) | default('', true) }}
+        _apic_porg_ptl_url: >-
+          {{ (_apic_porg_portal_services.json.results
+              | selectattr('name', 'equalto', _apic_catalog.portal)
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "Add {{ _apic_catalog.portal }} to catalog {{ _apic_catalog.name }}"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/{{ _apic_catalog.name }}/configured-portal-services"
+        method: POST
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers_json }}"
+        body_format: json
+        body:
+          portal_service_url: "{{ _apic_porg_ptl_url }}"
+        status_code: [201]
+      when:
+        - _apic_catalog_ptl_url | length == 0
+        - _apic_porg_ptl_url | length > 0
+
+    - name: "{{ _apic_catalog.portal }} not deployed notice"
+      ansible.builtin.debug:
+        msg: "Portal service {{ _apic_catalog.portal }} is not available; skipping for catalog {{ _apic_catalog.name }}."
+      when:
+        - _apic_catalog_ptl_url | length == 0
+        - _apic_porg_ptl_url | length == 0
+
+    - name: "{{ _apic_catalog.portal }} already configured notice"
+      ansible.builtin.debug:
+        msg: "Portal service {{ _apic_catalog.portal }} already configured in catalog {{ _apic_catalog.name }}."
+      when: _apic_catalog_ptl_url | length > 0

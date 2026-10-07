@@ -174,3 +174,60 @@ Usage: {{ include "apic.nanogatewayRedisHost" . }}
 {{- printf "%s-leader.%s.svc.cluster.local" (include "apic.valkeyClusterName" .) (include "apic.namespace" .) -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Read the alm-example spec of a given kind from the installed ibm-apiconnect
+operator CSV (what cp4i-demo scripts/87* do with `oc get csv ... alm-examples`).
+Returns the example's spec as JSON, or "{}" if the CSV/kind is not found
+(e.g. `helm template`, ArgoCD, or the operator isn't installed yet).
+Usage: {{ include "apic.almSpec" (dict "root" . "kind" "ManagementCluster") }}
+*/}}
+{{- define "apic.almSpec" -}}
+{{- $spec := dict -}}
+{{- $csvs := lookup "operators.coreos.com/v1alpha1" "ClusterServiceVersion" (include "apic.namespace" .root) "" -}}
+{{- range (default (dict) $csvs).items -}}
+{{- if hasPrefix "ibm-apiconnect." .metadata.name -}}
+{{- $examples := (index (default (dict) .metadata.annotations) "alm-examples") | default "[]" | fromJsonArray -}}
+{{- range $examples -}}
+{{- if eq .kind $.kind -}}
+{{- $spec = .spec -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $spec | toJson -}}
+{{- end }}
+
+{{/*
+Product version for a subsystem CR: global.appProductVersion if set, otherwise
+the version of the installed operator's alm-example for that kind.
+Usage: {{ include "apic.version" (dict "root" . "kind" "ManagementCluster") }}
+*/}}
+{{- define "apic.version" -}}
+{{- if .root.Values.global.appProductVersion -}}
+{{- .root.Values.global.appProductVersion -}}
+{{- else -}}
+{{- $v := (include "apic.almSpec" . | fromJson).version -}}
+{{- if not $v -}}
+{{- fail (printf "global.appProductVersion is empty and no %s alm-example was found in the ibm-apiconnect CSV in namespace %s (not installed yet, or rendering offline/ArgoCD). Set global.appProductVersion explicitly." .kind (include "apic.namespace" .root)) -}}
+{{- end -}}
+{{- $v -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+License ID for a subsystem CR: global.license.id if set, otherwise the license
+of the installed operator's alm-example for that kind.
+Usage: {{ include "apic.licenseId" (dict "root" . "kind" "ManagementCluster") }}
+*/}}
+{{- define "apic.licenseId" -}}
+{{- if .root.Values.global.license.id -}}
+{{- .root.Values.global.license.id -}}
+{{- else -}}
+{{- $l := ((include "apic.almSpec" . | fromJson).license | default dict).license -}}
+{{- if not $l -}}
+{{- fail (printf "global.license.id is empty and no %s alm-example was found in the ibm-apiconnect CSV in namespace %s (not installed yet, or rendering offline/ArgoCD). Set global.license.id explicitly." .kind (include "apic.namespace" .root)) -}}
+{{- end -}}
+{{- $l -}}
+{{- end -}}
+{{- end }}

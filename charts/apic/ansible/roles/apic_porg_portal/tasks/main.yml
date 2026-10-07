@@ -2,7 +2,7 @@
 # Equivalent of cp4i-demo scripts/87u-apic-porg-config-ptl.sh:
 #   - for every user recorded in the porg-lur-users-info state secret,
 #     for every provider org they own, add every deployed portal service
-#     (wm-devportal-service) to the Sandbox catalog, if not already there.
+#     (wm-devportal-service) to each catalog of apic_porg_catalogs, if not already there.
 
 - name: "Read porg-lur-users-info state secret"
   kubernetes.core.k8s_info:

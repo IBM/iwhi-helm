@@ -4,7 +4,7 @@ Helm chart for deploying IBM API Connect 12.1.x on OpenShift Container Platform.
 
 Notes:
 - This version of the chart deploys at most one instance of each APIC subsystem in a single namespace (including the operators.)  Other deployment topologies are possible but are not (yet) covered by this chart.
-- The DataPower API Gateway is not yet handled by this chart — only the webMethods API Gateway and the DataPower Nano Gateway are supported.
+- The DataPower API Gateway v5 is not handled by this chart — the DataPower API Gateway (v6, `dpapigateway`), the webMethods API Gateway and the DataPower Nano Gateway are supported. The DataPower API Gateway is opt-in (`dpapigateway.enabled`, default `false`).
 - The CMS-based Developer Portal (Drupal) is not yet handled — only the webMethods Developer Portal is supported.
 
 ## Infrastructure Requirements
@@ -99,9 +99,10 @@ oc get csv -n cert-manager-operator -w
 
 ### Apply the catalog sources
 
-API Connect requires 2 catalog sources to be available in the cluster:
+API Connect requires 3 catalog sources to be available in the cluster:
 - `ibm-apiconnect`
 - `ibm-cp-common-services`
+- `ibm-datapower-operator-catalog` (the DataPower operator is a prerequisite of API Connect, subscribed explicitly by this chart: `subscriptions.datapower.*`, channel `v1.18-sc2`)
 
 No catalog source is needed for the EDB PostgreSQL operator: the `ibm-apiconnect` operator creates its own (`integration-ibm-cloud-native-postgresql`, in the chart's namespace) when it reconciles the ManagementCluster. On an air-gapped cluster, mirror the image of that catalog (`ibm-integration-cloud-native-postgresql-catalog`) with the other CASE images.
 
@@ -110,6 +111,7 @@ These are published as CASE packages on [IBM/cloud-pak/repo/case](https://github
 A copy of the catalog sources needed for this chart is included in this repo. Install them with:
 ```bash
 oc apply -f catalog-sources/12.1.1.3/catalog-sources-apiconnect.yaml
+oc apply -f catalog-sources/12.1.1.3/catalog-sources-datapower.yaml
 ```
 
 **Air-gapped clusters**: the command above points the catalog sources at the public IBM registry, which won't be reachable. Mirror the CASE packages' images to your own registry first and apply the mirrored catalog sources instead — see `airgapped-install.md` at the repo root for the full procedure.
@@ -213,7 +215,7 @@ Key parameters to configure:
 
 **Global parameters:**
 - `global.namespace` - Target namespace
-- `global.appProductVersion` - the product version you want to install (or upgrade to) 
+- `global.appProductVersion` - the product version you want to install (or upgrade to). Leave it empty (default) to read it from the installed `ibm-apiconnect` operator CSV (`alm-examples`, per subsystem kind) at render time, which needs a live cluster and a finished wave 1: with `helm template` or ArgoCD, set it explicitly
 - `global.stackHost` - Ingress / Route domain
 - `global.imageRegistry` - if you're pulling the images from a local registry, specify it here
 - `global.imagePullSecret` - by default it points to a pull secret named ibm-entitlement-key, but you can change it
@@ -222,7 +224,7 @@ Key parameters to configure:
 **Licence parameters:**  
 See [documentation](https://www.ibm.com/docs/en/api-connect/software/12.1.0?topic=settings-basic-configuration) for more details regarding licenses.
 - `global.license.accept` - you must set it to `true`, to mark your formal agreement
-- `global.license.id` - specify a license ID from the version of API Connect that you are installing or are upgrading to
+- `global.license.id` - a license ID from the version of API Connect that you are installing or are upgrading to. Leave it empty (default) to read each subsystem's license from the operator CSV's `alm-examples`, as for `global.appProductVersion`; set it to force one license on every subsystem (e.g. a webMethods API Management license)
 - `global.license.use` - production or nonproduction
 - `global.license.metric` - PROCESSOR_VALUE_UNIT or MONTHLY_API_CALL
 
@@ -304,6 +306,17 @@ See `examples/values-externaljars.yaml` for a worked example (Tibco EMS JMS
 drivers over HTTPS with basic auth, a custom CA, and pinned digests), including
 the prerequisite secrets to create.
 
+**DataPower API Gateway parameters** (`GatewayCluster`, requires the DataPower operator installed by `subscriptions.datapower`):
+- `dpapigateway.enabled` - set to `true` to deploy it (default `false`)
+- `dpapigateway.profile` - sizing profile (default `n1xc4.m8`)
+- `dpapigateway.replicaCount` - number of gateway pods (default `3`)
+- `dpapigateway.imageRegistry` / `dpapigateway.storageClass` - override `global.*`; inherit when empty
+- `dpapigateway.v5CompatibilityMode`, `dpapigateway.logLevel`, `dpapigateway.mtlsValidateClient` - gateway behaviour (defaults `false`, `3`, `true`)
+- `dpapigateway.tokenManagementService.enabled` / `.volumeSize` - token management service and its volume (default enabled, `30Gi`)
+- `dpapigateway.adminSecret.enabled` / `.name` / `.autoGenerate` - admin password secret (key `password`, default `gateway-admin-secret`), generated by this chart in wave 2. **Required**: without it the gateway stays `Pending` (the operator creates the `DataPowerService` with an empty `passwordSecret`, which is rejected)
+
+The gateway uses the `gateway-service`, `gateway-peering` and `gateway-client-client` certificates created in wave 2. The post-configuration job (wave 4, tag `dp_api_gateway`) registers it in Cloud Manager as `api-gateway-service`, and skips the step when the `GatewayCluster` CR does not exist.
+
 **Nano Gateway subsystem parameters:**
 - `nanogateway.enabled` - set to `true` to deploy this subsystem (disabled by default; also deploys its dedicated operator in wave 1, which requires Gateway API - see prerequisites above)
 - `nanogateway.skipGatewayApiCheck` - set to `true` to bypass the Gateway API availability check in wave 1 (required for `helm template` / `--dry-run=client` / CI, which have no live cluster to check against)
@@ -384,7 +397,7 @@ helm upgrade --install apic-operators . \
 **Wait for operators to be ready (2-5 minutes):**
 
 ```bash
-# Check ClusterServiceVersions (ibm-apiconnect, ibm-common-service-operator, operand-deployment-lifecycle-manager must be in PHASE: Succeeded)
+# Check ClusterServiceVersions (ibm-apiconnect, datapower-operator, ibm-common-service-operator, operand-deployment-lifecycle-manager must be in PHASE: Succeeded)
 oc get csv -n $NAMESPACE 
 
 # Verify the operator pods are running (pods ibm-apiconnect-*, ibm-common-service-operator-* and operand-deployment-lifecycle-manager-* must be in status Running)
@@ -435,6 +448,8 @@ Check subsystem statuses (all subsystems must show Phase: Ready):
 oc get managementcluster.management.apiconnect.ibm.com/management -n $NAMESPACE
 oc get analyticscluster.analytics.apiconnect.ibm.com/analytics -n $NAMESPACE
 oc get wmapigatewaycluster.wmapigateway.apiconnect.ibm.com/wmapigateway -n $NAMESPACE
+# If dpapigateway.enabled: true
+oc get gatewaycluster.gateway.apiconnect.ibm.com/gateway -n $NAMESPACE
 oc get devportalcluster.devportal.apiconnect.ibm.com/devportal -n $NAMESPACE
 oc get federatedapimanagementcluster.federatedapimanagement.apiconnect.ibm.com/fam -n $NAMESPACE
 ```
@@ -454,7 +469,7 @@ oc get valkeycluster.valkey.datapower.ibm.com/valkey -n $NAMESPACE
 Once all wave 3 subsystems are Ready, wave 4 automates the manual Cloud Manager configuration steps otherwise required, in this order:
 1. Connect Cloud Manager to a mail server.
 2. Create a Provider Org and the admin user that owns it.
-3. Wire each deployed subsystem (analytics, wM API Gateway, Nano Gateway, wM Developer Portal, FAM) into the Cloud Manager topology and the Provider Org's Sandbox catalog.
+3. Wire each deployed subsystem (analytics, DataPower API Gateway, wM API Gateway, Nano Gateway, wM Developer Portal, FAM) into the Cloud Manager topology, and create one catalog per gateway in the Provider Org (`postConfig.catalogs`: `sandbox-dp`, `sandbox-wm`, `sandbox-nano` by default), each connected to the same Developer Portal. The org's default `sandbox` catalog is left empty. A webMethods API Gateway can only be configured in one catalog across the whole system (the API rejects a second one), so it must not be in `sandbox` as well.
 
 It runs a Kubernetes Job executing the Ansible playbook shipped in `ansible/` (packaged into a ConfigMap by this chart — nothing to install on your workstation).
 
@@ -482,7 +497,7 @@ oc logs -f job/apic-postconfig -n $NAMESPACE
 oc get job apic-postconfig -n $NAMESPACE
 ```
 
-The Job is idempotent (safe to rerun in full). To rerun only part of it (e.g. after fixing a subsystem that wasn't Ready yet), set `postConfig.tags` to one or more of: `initial_config`, `porg_lur`, `analytics`, `wm_api_gateway`, `nano_gateway`, `wm_devportal`, `fam`, `porg_gateways`, `porg_portal`, `config_info`.
+The Job is idempotent (safe to rerun in full). To rerun only part of it (e.g. after fixing a subsystem that wasn't Ready yet), set `postConfig.tags` to one or more of: `initial_config`, `porg_lur`, `analytics`, `dp_api_gateway`, `wm_api_gateway`, `nano_gateway`, `wm_devportal`, `fam`, `porg_gateways`, `porg_portal`, `consumer_orgs`, `config_info`.
 
 **Post-config parameters:**
 - `postConfig.enabled` - set to `true` to deploy the wave 4 Job (disabled by default)
@@ -490,6 +505,8 @@ The Job is idempotent (safe to rerun in full). To rerun only part of it (e.g. af
 - `postConfig.backoffLimit` - Job retry count on failure (default: `2`)
 - `postConfig.resources` - CPU/memory limits and requests for the Job pod
 - `postConfig.tags` - list of Ansible tags to run; leave empty (default) to run the full sequence
+- `postConfig.catalogTlsClientProfiles` - org-level TLS client profiles (`name` or `name:version`) configured in every catalog of `postConfig.catalogs`; default `tls-client-profile-default:1.0.0`. API Connect gives the default `sandbox` catalog its own `tls-client-profile-catalog-default`, the catalogs created by the job get none unless listed here
+- `postConfig.catalogs` - list of `{ name, title, gateway, portal, consumerOrg? }`: the catalogs created in the provider org, each with its own gateway service (`api-gateway-service`, `wm-gateway-service`, `nano-gateway-service`) and the portal service it is connected to (`wm-devportal-service` for all by default). `consumerOrg` (`name`, `title`, `owner.{username,email,firstName,lastName}`) creates a consumer org in the catalog (role `apic_consumer_orgs`, tag `consumer_orgs`): its owner is a new user of the catalog's own registry (`<catalog>-catalog`), with a generated password stored in the secret `consumer-org-users-info` (`make info SHOW_SECRETS=yes` prints it). A catalog whose gateway service is not deployed is skipped; the default `sandbox` catalog is not touched (API Connect gives it its own `sandbox-test-org` consumer org)
 - `postConfig.mailServer.name` / `.title` / `.host` / `.port` - the mail server definition registered in Cloud Manager, connected **before** the provider org is created. **Required, no default** — e.g. `mailpit-server` / `Mail Pit Server` / `mailpit-smtp.mailpit.svc.cluster.local` / `1025` if using the MailPit instance from Prerequisites above
 - `postConfig.mailServer.secure` - enable TLS/STARTTLS when talking to the SMTP server (default: `false`, matches MailPit's unauthenticated/insecure setup)
 - `postConfig.providerOrg.name` / `.title` - the Provider Org to create (default: `user-demo-org` / `USER Demo Provider Org`)

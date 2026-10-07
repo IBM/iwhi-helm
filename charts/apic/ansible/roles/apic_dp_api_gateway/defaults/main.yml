@@ -1,0 +1,8 @@
+---
+# Name of the GatewayCluster CR (charts/apic/templates/gateway-cr.yaml).
+apic_dpgateway_instance: gateway
+# Default TLS client profile created by the operator for the DataPower API
+# Gateway (backed by the gateway-client-client certificate).
+apic_dpgateway_tls_client_profile: gateway-management-client-default
+# Enable the AI gateway capability on the gateway service (as cp4i-demo does).
+apic_dpgateway_ai_gateway_enabled: true

@@ -1,0 +1,182 @@
+---
+# Add the DataPower API Gateway (GatewayCluster CR, values: dpapigateway) to
+# the Cloud Manager topology, if absent. Skipped when the GatewayCluster CR
+# does not exist (dpapigateway.enabled: false). The service is named
+# api-gateway-service, which role apic_porg_gateways then adds to the
+# catalog created for it by role apic_porg_gateways.
+#
+# Relies on objects the ibm-apiconnect operator creates by default in Cloud
+# Manager: integration 'datapower-api-gateway', TLS client profile
+# 'gateway-management-client-default' (backed by the gateway-client-client
+# certificate) and TLS server profile 'tls-server-profile-default'.
+
+- name: "Look up the GatewayCluster CR"
+  kubernetes.core.k8s_info:
+    api_version: gateway.apiconnect.ibm.com/v1beta1
+    kind: GatewayCluster
+    name: "{{ apic_dpgateway_instance }}"
+    namespace: "{{ apic_namespace }}"
+  register: _apic_dpgw_cr
+
+- name: "DataPower API Gateway not deployed notice"
+  ansible.builtin.debug:
+    msg: >-
+      GatewayCluster {{ apic_dpgateway_instance }} not found in namespace
+      {{ apic_namespace }}; skipping DataPower API Gateway topology.
+  when: _apic_dpgw_cr.resources | length == 0
+
+- name: "Configure the DataPower API Gateway topology"
+  when: _apic_dpgw_cr.resources | length > 0
+  block:
+    - name: "Log in as admin"
+      ansible.builtin.include_role:
+        name: apic_common
+        tasks_from: admin_login.yml
+
+    - name: "List existing gateway services"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/orgs/admin/availability-zones/availability-zone-default/gateway-services"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_gateway_services
+
+    - name: "Set gateway service URL fact from existing definition"
+      ansible.builtin.set_fact:
+        _apic_svc_url: >-
+          {{ (_apic_gateway_services.json.results
+              | selectattr('name', 'equalto', 'api-gateway-service')
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "Create DataPower API Gateway service block"
+      when: _apic_svc_url | length == 0
+      block:
+        - name: "List integration gateway services"
+          ansible.builtin.uri:
+            url: "{{ apic_server_url }}/api/cloud/integrations/gateway-service"
+            method: GET
+            validate_certs: "{{ apic_validate_certs }}"
+            headers: "{{ apic_auth_headers }}"
+            status_code: [200]
+          register: _apic_integrations
+
+        - name: "Set integration service URL fact"
+          ansible.builtin.set_fact:
+            _apic_int_url: >-
+              {{ (_apic_integrations.json.results
+                  | selectattr('name', 'equalto', 'datapower-api-gateway')
+                  | map(attribute='url') | first) | default('', true) }}
+
+        - name: "Fail if the DataPower API Gateway integration service is missing"
+          ansible.builtin.fail:
+            msg: >-
+              DataPower API Gateway integration service
+              'datapower-api-gateway' is not available in this API Connect
+              stack. Available: {{ _apic_integrations.json.results | map(attribute='name') | list }}
+          when: _apic_int_url | length == 0
+
+        - name: "List TLS client profiles"
+          ansible.builtin.uri:
+            url: "{{ apic_server_url }}/api/orgs/admin/tls-client-profiles"
+            method: GET
+            validate_certs: "{{ apic_validate_certs }}"
+            headers: "{{ apic_auth_headers }}"
+            status_code: [200]
+          register: _apic_tls_client_profiles
+
+        - name: "Set TLS client profile URL fact"
+          ansible.builtin.set_fact:
+            _apic_svc_tls_cpro_url: >-
+              {{ (_apic_tls_client_profiles.json.results
+                  | selectattr('name', 'equalto', apic_dpgateway_tls_client_profile)
+                  | map(attribute='url') | first) | default('', true) }}
+
+        - name: "Fail if the DataPower API Gateway TLS client profile is missing"
+          ansible.builtin.fail:
+            msg: >-
+              TLS Client Profile '{{ apic_dpgateway_tls_client_profile }}' is
+              not available. Available:
+              {{ _apic_tls_client_profiles.json.results | map(attribute='name') | list }}.
+              Override with -e apic_dpgateway_tls_client_profile=<name>.
+          when: _apic_svc_tls_cpro_url | length == 0
+
+        - name: "List TLS server profiles"
+          ansible.builtin.uri:
+            url: "{{ apic_server_url }}/api/orgs/admin/tls-server-profiles"
+            method: GET
+            validate_certs: "{{ apic_validate_certs }}"
+            headers: "{{ apic_auth_headers }}"
+            status_code: [200]
+          register: _apic_tls_server_profiles
+
+        - name: "Set TLS server profile URL fact"
+          ansible.builtin.set_fact:
+            _apic_svc_tls_spro_url: >-
+              {{ (_apic_tls_server_profiles.json.results
+                  | selectattr('name', 'equalto', 'tls-server-profile-default')
+                  | map(attribute='url') | first) | default('', true) }}
+
+        - name: "Fail if the TLS server profile is missing"
+          ansible.builtin.fail:
+            msg: "TLS Server Profile 'tls-server-profile-default' is not available in this API Connect stack."
+          when: _apic_svc_tls_spro_url | length == 0
+
+        - name: "List analytics services"
+          ansible.builtin.uri:
+            url: "{{ apic_server_url }}/api/orgs/admin/availability-zones/availability-zone-default/analytics-services"
+            method: GET
+            validate_certs: "{{ apic_validate_certs }}"
+            headers: "{{ apic_auth_headers }}"
+            status_code: [200]
+          register: _apic_analytics_services
+
+        - name: "Set analytics service URL fact (optional)"
+          ansible.builtin.set_fact:
+            _apic_a7s_url: >-
+              {{ (_apic_analytics_services.json.results
+                  | selectattr('name', 'equalto', 'analytics-service')
+                  | map(attribute='url') | first) | default('', true) }}
+
+        - name: "Set gateway endpoint URL facts from the GatewayCluster CR"
+          ansible.builtin.set_fact:
+            _apic_gw_mgmt_url: "https://{{ _apic_dpgw_cr.resources[0].spec.gatewayManagerEndpoint.hosts[0].name }}"
+            _apic_gw_url: "https://{{ _apic_dpgw_cr.resources[0].spec.gatewayEndpoint.hosts[0].name }}"
+
+        - name: "Build the gateway service definition body"
+          ansible.builtin.set_fact:
+            _apic_gtwy_svc_body: >-
+              {{
+                {
+                  'type': 'gateway_service',
+                  'gateway_service_type': 'datapower-api-gateway',
+                  'api_version': '2.0.0',
+                  'name': 'api-gateway-service',
+                  'title': 'api-gateway-service',
+                  'integration_url': _apic_int_url,
+                  'endpoint': _apic_gw_mgmt_url,
+                  'api_endpoint_base': _apic_gw_url,
+                  'tls_client_profile_url': _apic_svc_tls_cpro_url,
+                  'sni': [{'host': '*', 'tls_server_profile_url': _apic_svc_tls_spro_url}],
+                  'communication_kind': 'external',
+                  'communication_to_analytics_kind': 'external',
+                  'communication_to_analytics_with_jwt': false,
+                  'ai_gateway_enabled': apic_dpgateway_ai_gateway_enabled,
+                }
+                | combine({'analytics_service_url': _apic_a7s_url} if _apic_a7s_url | length > 0 else {})
+              }}
+
+        - name: "Create the DataPower API Gateway service"
+          ansible.builtin.uri:
+            url: "{{ apic_server_url }}/api/orgs/admin/availability-zones/availability-zone-default/gateway-services"
+            method: POST
+            validate_certs: "{{ apic_validate_certs }}"
+            headers: "{{ apic_auth_headers_json }}"
+            body_format: json
+            body: "{{ _apic_gtwy_svc_body }}"
+            status_code: [201]
+
+    - name: "Existing gateway service notice"
+      ansible.builtin.debug:
+        msg: "Gateway service api-gateway-service already exists."
+      when: _apic_svc_url | length > 0

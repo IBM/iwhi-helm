@@ -34,7 +34,7 @@ spec:
     CN=wmapigateway-mgmt-client,O=cert-manager
     CN=devportal-wmapigateway-client,O=cert-manager
   profile: {{ .Values.wmapigateway.profile }}
-  version: {{ .Values.global.appProductVersion }}
+  version: {{ include "apic.version" (dict "root" . "kind" "WMAPIGatewayCluster") }}
   imagePullSecrets:
   - {{ .Values.global.imagePullSecret }}
   imageRegistry: {{ include "apic.imageRegistry" (dict "subsystem" .Values.wmapigateway "global" .Values.global) }}
@@ -52,7 +52,7 @@ spec:
       volumeSize: {{ .Values.wmapigateway.dataVolumeSize }}
   license:
     accept: {{ .Values.global.license.accept }}
-    license: {{ .Values.global.license.id | quote }}
+    license: {{ include "apic.licenseId" (dict "root" . "kind" "WMAPIGatewayCluster") | quote }}
     metric: {{ .Values.global.license.metric }}
     use: {{ .Values.global.license.use }}
   {{- $ext := .Values.wmapigateway.externalJars }}

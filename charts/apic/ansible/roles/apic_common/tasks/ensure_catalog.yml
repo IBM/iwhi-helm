@@ -1,0 +1,26 @@
+---
+# Creates catalog {{ _apic_catalog.name }} in provider org {{ _apic_porg_name }}
+# if absent. Include with `_apic_porg_name` and `_apic_catalog` ({name, title})
+# set, after logging in as a provider org user (apic_auth_headers).
+
+- name: "List catalogs of provider org {{ _apic_porg_name }}"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/orgs/{{ _apic_porg_name }}/catalogs"
+    method: GET
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers }}"
+    status_code: [200]
+  register: _apic_org_catalogs
+
+- name: "Create catalog {{ _apic_catalog.name }}"
+  ansible.builtin.uri:
+    url: "{{ apic_server_url }}/api/orgs/{{ _apic_porg_name }}/catalogs"
+    method: POST
+    validate_certs: "{{ apic_validate_certs }}"
+    headers: "{{ apic_auth_headers_json }}"
+    body_format: json
+    body:
+      name: "{{ _apic_catalog.name }}"
+      title: "{{ _apic_catalog.title | default(_apic_catalog.name) }}"
+    status_code: [201]
+  when: _apic_catalog.name not in (_apic_org_catalogs.json.results | map(attribute='name') | list)

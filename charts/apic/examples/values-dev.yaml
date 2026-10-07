@@ -23,11 +23,9 @@ global:
   imageRegistry: cp.icr.io/cp/apic
   stackHost: iwhi-dev.apps.itz-r816vx.infra01-lb.fra02.techzone.ibm.com
   storageClass: ocs-external-storagecluster-ceph-rbd
-  appProductVersion: "12.1.1.3"
   license:
     accept: true
     use: production
-    id: L-PDZK-TWDH97
 
 certificates:
   enabled: true

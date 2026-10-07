@@ -10,8 +10,8 @@
 # Rerun a single step:
 #   ansible-playbook site.yml --tags nano_gateway
 #
-# Tags: initial_config, porg_lur, analytics, wm_api_gateway, nano_gateway,
-#       wm_devportal, fam, porg_gateways, porg_portal, config_info
+# Tags: initial_config, porg_lur, analytics, dp_api_gateway, wm_api_gateway, nano_gateway,
+#       wm_devportal, fam, porg_gateways, porg_portal, consumer_orgs, config_info
 
 - name: API Connect post-configuration
   hosts: localhost
@@ -31,6 +31,11 @@
       ansible.builtin.include_role:
         name: apic_analytics_config
       tags: [analytics]
+
+    - name: "DataPower API Gateway topology"
+      ansible.builtin.include_role:
+        name: apic_dp_api_gateway
+      tags: [dp_api_gateway]
 
     - name: "wM API Gateway topology"
       ansible.builtin.include_role:
@@ -52,15 +57,20 @@
         name: apic_fam_config
       tags: [fam]
 
-    - name: "Sandbox catalog: gateways"
+    - name: "Catalogs: one per gateway"
       ansible.builtin.include_role:
         name: apic_porg_gateways
       tags: [porg_gateways]
 
-    - name: "Sandbox catalog: portals"
+    - name: "Catalogs: connect the portal"
       ansible.builtin.include_role:
         name: apic_porg_portal
       tags: [porg_portal]
+
+    - name: "Consumer orgs: one per catalog"
+      ansible.builtin.include_role:
+        name: apic_consumer_orgs
+      tags: [consumer_orgs]
 
     - name: "Summary of access info"
       ansible.builtin.include_role:

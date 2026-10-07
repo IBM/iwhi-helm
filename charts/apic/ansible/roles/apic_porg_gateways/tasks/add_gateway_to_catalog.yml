@@ -1,47 +1,67 @@
 ---
-# Runs once per fixed gateway service name ({{ _apic_gtwy_name }}), within
-# provider org {{ _apic_porg_name }}.
+# Runs once per catalog ({{ _apic_catalog.name }}) within provider org
+# {{ _apic_porg_name }}: creates the catalog and configures its gateway
+# service ({{ _apic_catalog.gateway }}). Skipped when that gateway service is
+# not deployed, so no empty catalog is created.
 
-- name: "Set already-configured URL fact for {{ _apic_gtwy_name }}"
-  ansible.builtin.set_fact:
-    _apic_catalog_gtwy_url: >-
-      {{ (_apic_catalog_gateway_services.json.results
-          | selectattr('name', 'equalto', _apic_gtwy_name)
-          | map(attribute='url') | first) | default('', true) }}
-
-- name: "Set org-visible URL fact for {{ _apic_gtwy_name }}"
+- name: "Set org-visible URL fact for {{ _apic_catalog.gateway }}"
   ansible.builtin.set_fact:
     _apic_porg_gtwy_url: >-
       {{ (_apic_porg_gateway_services.json.results
-          | selectattr('name', 'equalto', _apic_gtwy_name)
+          | selectattr('name', 'equalto', _apic_catalog.gateway)
           | map(attribute='url') | first) | default('', true) }}
 
-- name: "Add {{ _apic_gtwy_name }} to the Sandbox catalog of {{ _apic_porg_name }}"
-  ansible.builtin.uri:
-    url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/sandbox/configured-gateway-services"
-    method: POST
-    validate_certs: "{{ apic_validate_certs }}"
-    headers: "{{ apic_auth_headers_json }}"
-    body_format: json
-    body:
-      gateway_service_url: "{{ _apic_porg_gtwy_url }}"
-    status_code: [201]
-  when:
-    - _apic_catalog_gtwy_url | length == 0
-    - _apic_porg_gtwy_url | length > 0
-
-- name: "{{ _apic_gtwy_name }} not deployed notice"
+- name: "{{ _apic_catalog.gateway }} not deployed notice"
   ansible.builtin.debug:
     msg: >-
-      Gateway service {{ _apic_gtwy_name }} is not available in this
-      environment; skipping for provider org {{ _apic_porg_name }}.
-  when:
-    - _apic_catalog_gtwy_url | length == 0
-    - _apic_porg_gtwy_url | length == 0
+      Gateway service {{ _apic_catalog.gateway }} is not available in this
+      environment; skipping catalog {{ _apic_catalog.name }} for provider org
+      {{ _apic_porg_name }}.
+  when: _apic_porg_gtwy_url | length == 0
 
-- name: "{{ _apic_gtwy_name }} already configured notice"
-  ansible.builtin.debug:
-    msg: >-
-      Gateway service {{ _apic_gtwy_name }} already configured in the Sandbox
-      catalog of provider org {{ _apic_porg_name }}.
-  when: _apic_catalog_gtwy_url | length > 0
+- name: "Configure catalog {{ _apic_catalog.name }}"
+  when: _apic_porg_gtwy_url | length > 0
+  block:
+    - name: "Ensure catalog {{ _apic_catalog.name }} exists"
+      ansible.builtin.include_role:
+        name: apic_common
+        tasks_from: ensure_catalog.yml
+
+    - name: "List gateway services already configured in catalog {{ _apic_catalog.name }}"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/{{ _apic_catalog.name }}/configured-gateway-services"
+        method: GET
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers }}"
+        status_code: [200]
+      register: _apic_catalog_gateway_services
+
+    - name: "Set already-configured URL fact for {{ _apic_catalog.gateway }}"
+      ansible.builtin.set_fact:
+        _apic_catalog_gtwy_url: >-
+          {{ (_apic_catalog_gateway_services.json.results
+              | selectattr('name', 'equalto', _apic_catalog.gateway)
+              | map(attribute='url') | first) | default('', true) }}
+
+    - name: "Add {{ _apic_catalog.gateway }} to catalog {{ _apic_catalog.name }}"
+      ansible.builtin.uri:
+        url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/{{ _apic_catalog.name }}/configured-gateway-services"
+        method: POST
+        validate_certs: "{{ apic_validate_certs }}"
+        headers: "{{ apic_auth_headers_json }}"
+        body_format: json
+        body:
+          gateway_service_url: "{{ _apic_porg_gtwy_url }}"
+        status_code: [201]
+      when: _apic_catalog_gtwy_url | length == 0
+
+    - name: "Configure the TLS client profiles of catalog {{ _apic_catalog.name }}"
+      ansible.builtin.include_tasks: add_tls_client_profile_to_catalog.yml
+      when: apic_porg_catalog_tls_client_profiles | length > 0
+
+    - name: "{{ _apic_catalog.gateway }} already configured notice"
+      ansible.builtin.debug:
+        msg: >-
+          Gateway service {{ _apic_catalog.gateway }} already configured in
+          catalog {{ _apic_catalog.name }} of provider org {{ _apic_porg_name }}.
+      when: _apic_catalog_gtwy_url | length > 0

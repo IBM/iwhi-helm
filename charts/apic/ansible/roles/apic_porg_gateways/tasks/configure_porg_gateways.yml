@@ -1,5 +1,6 @@
 ---
-# Runs once per provider org name ({{ _apic_porg_name }}).
+# Runs once per provider org name ({{ _apic_porg_name }}): one catalog per
+# entry of apic_porg_catalogs, each with its own gateway service.
 
 - name: "List gateway services visible in provider org {{ _apic_porg_name }}"
   ansible.builtin.uri:
@@ -10,20 +11,17 @@
     status_code: [200]
   register: _apic_porg_gateway_services
 
-- name: "List gateway services already configured in the Sandbox catalog"
+- name: "List TLS client profiles of provider org {{ _apic_porg_name }}"
   ansible.builtin.uri:
-    url: "{{ apic_server_url }}/api/catalogs/{{ _apic_porg_name }}/sandbox/configured-gateway-services"
+    url: "{{ apic_server_url }}/api/orgs/{{ _apic_porg_name }}/tls-client-profiles"
     method: GET
     validate_certs: "{{ apic_validate_certs }}"
     headers: "{{ apic_auth_headers }}"
     status_code: [200]
-  register: _apic_catalog_gateway_services
+  register: _apic_org_tls_client_profiles
 
-- name: "Add each known gateway service to the Sandbox catalog if missing"
+- name: "Configure each catalog with its gateway service"
   ansible.builtin.include_tasks: add_gateway_to_catalog.yml
-  loop:
-    - api-gateway-service
-    - nano-gateway-service
-    - wm-gateway-service
+  loop: "{{ apic_porg_catalogs }}"
   loop_control:
-    loop_var: _apic_gtwy_name
+    loop_var: _apic_catalog
