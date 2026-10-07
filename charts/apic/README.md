@@ -46,6 +46,22 @@ Valkey's actual data volumes are only created if `valkey.persistenceEnabled: tru
 
 A block storage class supporting dynamic provisioning is required; this chart does not use `ReadWriteMany` volumes.
 
+## Automating the prerequisites
+
+The steps below (prerequisites and the 4 waves) are wrapped by targets of the root `Makefile`; the manual commands remain valid and are what the targets run.
+
+```bash
+cp .env.example .env && $EDITOR .env          # IBM_ENTITLEMENT_KEY (git-ignored)
+make fill-values NAMESPACE=apic VALUES_FILE=charts/apic/examples/values-localissuer.yaml
+
+make platform-prereqs   # platform team: cert-manager, catalog sources, wildcard routes (Nano only), wave 0 (CRDs/RBAC)
+make deploy             # feature team: check-values, namespace, pull secret, waves 1-3 with waits between them
+make wave4 ...          # post-configuration (see Wave 4)
+make deploy-all         # both of the above, for a single cluster-admin
+```
+
+`AIRGAP=true` skips the public catalog sources (apply the `ibm-pak` generated ones instead, see `airgapped-install.md`); `APIC_VERSION` selects the `catalog-sources/<version>` directory. `make check-values` and `make check-tools` can be run on their own, `make info` prints the routes and how to read the admin passwords, and `make force-uninstall CONFIRM=yes` is the last-resort teardown.
+
 ## Platform-level Prerequisites
 
 Everything in this section is **cluster-scoped**: it requires cluster-admin-level RBAC, is done once per cluster (not once per installation), and is owned by the **platform team**. The feature team does not need any of these permissions for the rest of this README.

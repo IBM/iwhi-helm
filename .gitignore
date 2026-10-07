@@ -8,3 +8,4 @@ release-files
 *.key
 *.pem
 secret*.y*ml
+.env
