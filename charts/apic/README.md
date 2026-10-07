@@ -99,16 +99,17 @@ oc get csv -n cert-manager-operator -w
 
 ### Apply the catalog sources
 
-API Connect requires 3 catalog sources to be available in the cluster:
+API Connect requires 2 catalog sources to be available in the cluster:
 - `ibm-apiconnect`
 - `ibm-cp-common-services`
-- `ibm-cloud-native-postgresql`
+
+No catalog source is needed for the EDB PostgreSQL operator: the `ibm-apiconnect` operator creates its own (`integration-ibm-cloud-native-postgresql`, in the chart's namespace) when it reconciles the ManagementCluster. On an air-gapped cluster, mirror the image of that catalog (`ibm-integration-cloud-native-postgresql-catalog`) with the other CASE images.
 
 These are published as CASE packages on [IBM/cloud-pak/repo/case](https://github.com/IBM/cloud-pak/tree/master/repo/case), where you can also find them for other product versions.
 
 A copy of the catalog sources needed for this chart is included in this repo. Install them with:
 ```bash
-oc apply -f catalog-sources/12.1.1.0/catalog-sources-apiconnect.yaml
+oc apply -f catalog-sources/12.1.1.3/catalog-sources-apiconnect.yaml
 ```
 
 **Air-gapped clusters**: the command above points the catalog sources at the public IBM registry, which won't be reachable. Mirror the CASE packages' images to your own registry first and apply the mirrored catalog sources instead — see `airgapped-install.md` at the repo root for the full procedure.

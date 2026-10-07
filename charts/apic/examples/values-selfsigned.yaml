@@ -23,7 +23,7 @@ global:
   imageRegistry: cp.icr.io/cp/apic
   stackHost: apic.apps.itz-l9qxlg.infra01-lb.lon04.techzone.ibm.com # Replace with your cluster's host
   storageClass: ocs-external-storagecluster-ceph-rbd
-  appProductVersion: "12.1.1.0"
+  appProductVersion: "12.1.1.3"
   license:
     accept: true
     use: nonproduction

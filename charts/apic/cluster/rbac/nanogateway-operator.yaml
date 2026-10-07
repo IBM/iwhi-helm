@@ -54,6 +54,8 @@ rules:
   - jwtproviders
   - managements
   - mcptools
+  - mcpprompts
+  - mcpresources
   - oauthproviders
   - runtimeconfigs
   - runtimes
@@ -79,6 +81,8 @@ rules:
   - managements/scale
   - managements/status
   - mcptools/status
+  - mcpprompts/status
+  - mcpresources/status
   - oauthproviders/status
   - runtimeconfigs/status
   - runtimes/scale

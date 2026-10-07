@@ -6,13 +6,13 @@ Create the following environment variables with the installer image name and the
 
 ```bash
 export CASE_NAME=ibm-apiconnect
-export CASE_VERSION=8.0.0
+export CASE_VERSION=8.3.0   # API Connect 12.1.1.3
 export ARCH=amd64
 export CS_CASE_NAME=ibm-cp-common-services
 export CS_CASE_VERSION=4.19.1
 export CS_ARCH=amd64
-export EDB_CASE_NAME=ibm-cloud-native-postgresql
-export EDB_CASE_VERSION=5.40.0+20260511.071333.2716
+export DP_CASE_NAME=ibm-datapower-operator
+export DP_CASE_VERSION=1.18.5   # DataPower operator of API Connect 12.1.1.3 (channel v1.18-sc2)
 ```
 
 ## 2. Download the CASE files
@@ -20,7 +20,7 @@ export EDB_CASE_VERSION=5.40.0+20260511.071333.2716
 ```bash
 oc ibm-pak get $CASE_NAME --version $CASE_VERSION
 oc ibm-pak get $CS_CASE_NAME --version $CS_CASE_VERSION
-oc ibm-pak get $EDB_CASE_NAME --version $EDB_CASE_VERSION
+oc ibm-pak get $DP_CASE_NAME --version $DP_CASE_VERSION
 ```
 
 ## 3. Define the target registry
@@ -36,14 +36,14 @@ Make sure you're logged in to `$TARGET_REGISTRY` (e.g. `podman login $TARGET_REG
 ```bash
 oc ibm-pak generate mirror-manifests $CASE_NAME --version $CASE_VERSION $TARGET_REGISTRY
 oc ibm-pak generate mirror-manifests $CS_CASE_NAME --version $CS_CASE_VERSION $TARGET_REGISTRY
-oc ibm-pak generate mirror-manifests $EDB_CASE_NAME --version $EDB_CASE_VERSION $TARGET_REGISTRY
+oc ibm-pak generate mirror-manifests $DP_CASE_NAME --version $DP_CASE_VERSION $TARGET_REGISTRY
 ```
 
 ## 5. Mirror the images
 
 The commands below use `oc image mirror`, the method documented by IBM for this step. Other mirroring tools (e.g. `skopeo`, `oc mirror` v2) are equally valid — use whichever fits your environment, as long as the images end up at `$TARGET_REGISTRY` per the generated `images-mapping.txt`.
 
-`images-mapping.txt` is a plain text file, one image per line (`source@sha256:...=destination:tag`). If you don't need every image it lists (e.g. only one EDB PostgreSQL version, or you're skipping a subsystem this chart doesn't deploy), you can edit it down to a smaller subset before mirroring — each line is independent.
+`images-mapping.txt` is a plain text file, one image per line (`source@sha256:...=destination:tag`). If you don't need every image it lists (e.g. only one EDB PostgreSQL version of the `ibm-apiconnect` CASE, or you're skipping a subsystem this chart doesn't deploy), you can edit it down to a smaller subset before mirroring — each line is independent.
 
 ```bash
 oc image mirror \
@@ -61,7 +61,7 @@ oc image mirror \
   --max-per-registry=1
 
 oc image mirror \
-  -f ~/.ibm-pak/data/mirror/$EDB_CASE_NAME/$EDB_CASE_VERSION/images-mapping.txt \
+  -f ~/.ibm-pak/data/mirror/$DP_CASE_NAME/$DP_CASE_VERSION/images-mapping.txt \
   -a $REGISTRY_AUTH_FILE \
   --filter-by-os '.*' \
   --skip-multiple-scopes \
@@ -75,7 +75,7 @@ This instructs the cluster to pull the images from your local registry:
 ```bash
 oc apply -f ~/.ibm-pak/data/mirror/$CASE_NAME/$CASE_VERSION/image-content-source-policy.yaml
 oc apply -f ~/.ibm-pak/data/mirror/$CS_CASE_NAME/$CS_CASE_VERSION/image-content-source-policy.yaml
-oc apply -f ~/.ibm-pak/data/mirror/$EDB_CASE_NAME/$EDB_CASE_VERSION/image-content-source-policy.yaml
+oc apply -f ~/.ibm-pak/data/mirror/$DP_CASE_NAME/$DP_CASE_VERSION/image-content-source-policy.yaml
 ```
 
 Verify that the ImageContentSourcePolicy resource was created:
@@ -115,10 +115,14 @@ oc get MachineConfigPool -w
 ```bash
 oc apply -f ~/.ibm-pak/data/mirror/${CASE_NAME}/${CASE_VERSION}/catalog-sources.yaml
 oc apply -f ~/.ibm-pak/data/mirror/${CS_CASE_NAME}/${CS_CASE_VERSION}/catalog-sources.yaml
-oc apply -f ~/.ibm-pak/data/mirror/${EDB_CASE_NAME}/${EDB_CASE_VERSION}/catalog-sources.yaml
+oc apply -f ~/.ibm-pak/data/mirror/${DP_CASE_NAME}/${DP_CASE_VERSION}/catalog-sources.yaml
 ```
 
-Note: use these generated files, not `charts/apic/catalog-sources/12.1.1.0/catalog-sources-apiconnect.yaml` in this repo — that one points at the public `icr.io` images, while the files generated here point at `$TARGET_REGISTRY`.
+Note: use these generated files, not `charts/apic/catalog-sources/12.1.1.3/*.yaml` in this repo — those point at the public `icr.io` images, while the files generated here point at `$TARGET_REGISTRY`.
+
+**EDB PostgreSQL catalog**: no catalog source is applied for it. On a connected cluster the `ibm-apiconnect` operator creates its own (`integration-ibm-cloud-native-postgresql`, in the chart's namespace, owned by the ManagementCluster) from the image `icr.io/cpopen/ibm-integration-cloud-native-postgresql-catalog`. Observed on a connected OpenShift 4.21 cluster with API Connect 12.1.1.3: the digest the operator used (`f37a533a…`) is **not** one of the three digests listed for that image in the `ibm-apiconnect` 8.3.0 CASE (`images-all.txt`), and it appears neither in the operator's CSV nor in its environment. It has not been verified that the mirrored CASE images are enough for that catalog pod to start air-gapped. Before relying on this procedure, check on a first install that the pod of the `integration-ibm-cloud-native-postgresql` CatalogSource reaches `Running` and, if it is in `ImagePullBackOff`, mirror the digest it asks for (`oc get catalogsource integration-ibm-cloud-native-postgresql -n <namespace> -o jsonpath='{.spec.image}'`).
+
+The standalone `ibm-cloud-native-postgresql` CASE is no longer downloaded or mirrored by the steps above. The EDB operator and PostgreSQL images used by API Connect (`ibm-apiconnect-management-edb-operator`, `-postgresql`, `-licence`) are part of the `ibm-apiconnect` CASE itself.
 
 ## 9. Deploy the apic chart
 
